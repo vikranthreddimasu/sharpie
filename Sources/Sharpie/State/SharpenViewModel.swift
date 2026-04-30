@@ -220,9 +220,16 @@ final class SharpenViewModel: ObservableObject {
             ? AppPreferences.openRouterModel
             : nil
 
-        streamTask = Task { [weak self, systemPrompt] in
+        // Resolve the system prompt for the *currently selected*
+        // provider — Apple Intelligence gets a smaller on-device-tuned
+        // prompt, frontier API providers get the full one. Resolved at
+        // submit time so a provider switch in Settings takes effect on
+        // the next ⌘/, no app restart.
+        let prompt = SystemPromptLoader.load(for: currentProvider)
+
+        streamTask = Task { [weak self] in
             guard let self else { return }
-            await self.runStream(systemPrompt: systemPrompt, userInput: userInput)
+            await self.runStream(systemPrompt: prompt, userInput: userInput)
         }
     }
 
