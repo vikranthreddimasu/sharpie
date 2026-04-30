@@ -189,20 +189,23 @@ final class SharpenWindowController {
     func showSettings() {
         if settingsWindow == nil {
             let w = NSWindow(
-                contentRect: NSRect(origin: .zero, size: NSSize(width: 460, height: 220)),
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 520, height: 420)),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false
             )
             w.title = "Sharpie Settings"
             w.isReleasedWhenClosed = false
-            let view = SettingsView(onClose: { [weak self] in
-                self?.settingsWindow?.close()
-            })
-            w.contentView = NSHostingView(rootView: view)
-            w.center()
             settingsWindow = w
         }
+        // Rebuild the SwiftUI view on every open so we re-read the
+        // Keychain (the "Stored / Replace" indicator must be current) and
+        // re-fetch the OpenRouter model list.
+        let fresh = SettingsView(onClose: { [weak self] in
+            self?.settingsWindow?.close()
+        })
+        settingsWindow?.contentView = NSHostingView(rootView: fresh)
+        settingsWindow?.center()
         settingsWindow?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
