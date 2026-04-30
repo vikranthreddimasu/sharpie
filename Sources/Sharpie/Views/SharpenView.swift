@@ -87,7 +87,8 @@ struct SharpenView: View {
             }
             SharpieTextView(
                 text: $viewModel.input,
-                focusToken: viewModel.inputFocusToken
+                focusToken: viewModel.inputFocusToken,
+                isEditable: viewModel.isInputEditable
             )
             .frame(minHeight: 36, maxHeight: 90)
         }
@@ -98,30 +99,21 @@ struct SharpenView: View {
     // MARK: - Output
 
     private var outputBlock: some View {
-        ZStack(alignment: .topTrailing) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    outputContent
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 16)
-                    // Sentinel anchor at the bottom of the rendered text
-                    // so we can pin the scroll position to the latest
-                    // streamed token.
-                    Color.clear.frame(height: 1).id("outputBottom")
-                }
-                .onChange(of: viewModel.output) { _, _ in
-                    withAnimation(.easeOut(duration: 0.12)) {
-                        proxy.scrollTo("outputBottom", anchor: .bottom)
-                    }
-                }
+        ScrollViewReader { proxy in
+            ScrollView {
+                outputContent
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 16)
+                // Sentinel anchor at the bottom of the rendered text
+                // so we can pin the scroll position to the latest
+                // streamed token.
+                Color.clear.frame(height: 1).id("outputBottom")
             }
-
-            if case .copied = viewModel.status {
-                ToastView(text: "Copied")
-                    .padding(.top, 10)
-                    .padding(.trailing, 12)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
+            .onChange(of: viewModel.output) { _, _ in
+                withAnimation(.easeOut(duration: 0.12)) {
+                    proxy.scrollTo("outputBottom", anchor: .bottom)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -175,9 +167,7 @@ struct SharpenView: View {
 
     private var statusBar: some View {
         HStack(spacing: 8) {
-            if case .streaming = viewModel.status {
-                ProgressView().controlSize(.small).scaleEffect(0.7)
-            }
+            statusBarLeading
             Text(viewModel.statusLine)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
@@ -187,5 +177,27 @@ struct SharpenView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var statusBarLeading: some View {
+        switch viewModel.status {
+        case .streaming:
+            ProgressView().controlSize(.small).scaleEffect(0.7)
+        case .copied:
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.system(size: 11, weight: .semibold))
+        case .error:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .font(.system(size: 11, weight: .semibold))
+        case .clarifying:
+            Image(systemName: "questionmark.diamond.fill")
+                .foregroundStyle(.tint)
+                .font(.system(size: 11, weight: .semibold))
+        case .idle, .needsSetup:
+            EmptyView()
+        }
     }
 }
