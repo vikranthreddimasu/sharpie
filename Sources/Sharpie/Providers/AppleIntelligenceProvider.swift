@@ -66,23 +66,29 @@ struct AppleIntelligenceProvider: LLMProvider {
                         systemPrompt
                     }
 
-                    // Foundation Models streams *cumulative* partials
-                    // wrapped in a Snapshot — not deltas. The rest of the
-                    // app expects deltas (it does `accumulated += chunk`),
-                    // so emit the suffix that's new since the previous
-                    // partial.
+                    // Schema-constrained streaming. The model can only
+                    // emit tokens that keep the running output a valid
+                    // prefix of SharpenResponse — preambles and hedging
+                    // are mathematically impossible. We project the
+                    // `text` field as it grows and emit the new suffix
+                    // since the previous partial so the rest of the app
+                    // continues to see the delta-shaped stream every
+                    // provider speaks.
                     var emitted = ""
-                    for try await snapshot in session.streamResponse(to: userInput) {
+                    let stream = session.streamResponse(
+                        to: userInput,
+                        generating: SharpenResponse.self
+                    )
+                    for try await snapshot in stream {
                         if Task.isCancelled { break }
-                        let str = snapshot.content
-                        guard str.count > emitted.count else { continue }
-                        let startIdx = str.index(
-                            str.startIndex,
+                        guard let text = snapshot.content.text, text.count > emitted.count else { continue }
+                        let startIdx = text.index(
+                            text.startIndex,
                             offsetBy: emitted.count,
-                            limitedBy: str.endIndex
-                        ) ?? str.endIndex
-                        continuation.yield(String(str[startIdx...]))
-                        emitted = str
+                            limitedBy: text.endIndex
+                        ) ?? text.endIndex
+                        continuation.yield(String(text[startIdx...]))
+                        emitted = text
                     }
                     continuation.finish()
                 } catch is CancellationError {
