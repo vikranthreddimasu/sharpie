@@ -8,6 +8,7 @@ enum KeychainService {
 
     enum Account: String {
         case anthropic = "anthropic.api_key"
+        case openrouter = "openrouter.api_key"
     }
 
     @discardableResult

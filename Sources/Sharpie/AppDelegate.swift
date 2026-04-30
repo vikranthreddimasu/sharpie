@@ -81,9 +81,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(openItem)
 
         let settingsItem = NSMenuItem(
-            title: "Set Anthropic API Key…",
+            title: "Settings…",
             action: #selector(openSettings),
-            keyEquivalent: ""
+            keyEquivalent: ","
         )
         settingsItem.target = self
         menu.addItem(settingsItem)
