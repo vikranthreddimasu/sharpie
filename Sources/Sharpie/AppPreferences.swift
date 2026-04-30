@@ -17,7 +17,12 @@ enum AppPreferences {
     static var activeProvider: ProviderID {
         get {
             let raw = UserDefaults.standard.string(forKey: Keys.activeProvider) ?? ""
-            return ProviderID(rawValue: raw) ?? .openrouter
+            if let stored = ProviderID(rawValue: raw) { return stored }
+            // No saved preference yet. If Ollama is installed on this
+            // Mac, prefer it — zero-config, free, private. Otherwise
+            // fall back to OpenRouter (BYOA, cheap-SOTA-open).
+            if OllamaInstallation.isInstalled { return .ollama }
+            return .openrouter
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: Keys.activeProvider)

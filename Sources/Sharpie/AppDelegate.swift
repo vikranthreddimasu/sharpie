@@ -20,6 +20,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installStatusItem()
         installHotkey()
         firstRunFlowIfNeeded()
+        kickOffOllamaIfActive()
+    }
+
+    /// If the user is on the Ollama provider, eagerly launch the daemon
+    /// at app start so that hitting ⌘/ a couple seconds later "just
+    /// works". The starter is a no-op when the daemon is already up.
+    private func kickOffOllamaIfActive() {
+        guard AppPreferences.activeProvider == .ollama else { return }
+        guard let url = URL(string: AppPreferences.ollamaURL),
+              url.scheme != nil, url.host != nil else { return }
+        Task { @MainActor in
+            let starter = OllamaDaemonStarter()
+            await starter.startIfNeeded(baseURL: url)
+        }
     }
 
     /// If the user has no provider key on file, surface Settings on launch
