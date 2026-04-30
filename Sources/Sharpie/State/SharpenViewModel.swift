@@ -64,12 +64,13 @@ final class SharpenViewModel: ObservableObject {
         }
     }
 
-    private var hasAnyAPIKey: Bool {
+    private var hasUsableProvider: Bool {
         if KeychainService.get(.openrouter) != nil { return true }
         if KeychainService.get(.anthropic) != nil { return true }
         let env = ProcessInfo.processInfo.environment
         if let v = env["OPENROUTER_API_KEY"], !v.isEmpty { return true }
         if let v = env["ANTHROPIC_API_KEY"], !v.isEmpty { return true }
+        if ProviderFactory.isAppleIntelligenceReady { return true }
         return false
     }
 
@@ -83,7 +84,7 @@ final class SharpenViewModel: ObservableObject {
     /// sees what to do instead of typing into a dead input.
     func windowDidOpen() {
         if case .streaming = status { return }
-        if !hasAnyAPIKey {
+        if !hasUsableProvider {
             status = .needsSetup
             input = ""
             output = ""
