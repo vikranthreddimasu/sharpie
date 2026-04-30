@@ -189,7 +189,7 @@ final class SharpenWindowController {
     func showSettings() {
         if settingsWindow == nil {
             let w = NSWindow(
-                contentRect: NSRect(origin: .zero, size: NSSize(width: 520, height: 420)),
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 540, height: 580)),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false

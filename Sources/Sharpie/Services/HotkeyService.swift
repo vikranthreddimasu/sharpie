@@ -13,6 +13,10 @@ final class HotkeyService {
     private var handlerRef: EventHandlerRef?
     private var onFire: (() -> Void)?
 
+    func register(combo: KeyCombo, _ handler: @escaping () -> Void) {
+        register(keyCode: combo.carbonKeyCode, modifiers: combo.carbonModifiers, handler)
+    }
+
     func register(keyCode: UInt32, modifiers: UInt32, _ handler: @escaping () -> Void) {
         unregister()
         onFire = handler
@@ -70,10 +74,4 @@ final class HotkeyService {
     deinit {
         unregister()
     }
-}
-
-// Convenience constants. Keys are the Carbon virtual key codes.
-enum DefaultHotkey {
-    static let keyCode: UInt32 = UInt32(kVK_ANSI_Slash)
-    static let modifiers: UInt32 = UInt32(cmdKey)
 }
