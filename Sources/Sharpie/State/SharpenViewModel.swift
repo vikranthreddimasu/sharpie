@@ -92,7 +92,6 @@ final class SharpenViewModel: ObservableObject {
         let env = ProcessInfo.processInfo.environment
         if let v = env["OPENROUTER_API_KEY"], !v.isEmpty { return true }
         if let v = env["ANTHROPIC_API_KEY"], !v.isEmpty { return true }
-        if ProviderFactory.isAppleIntelligenceReady { return true }
         return false
     }
 

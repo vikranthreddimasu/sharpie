@@ -1,31 +1,15 @@
 import Foundation
 
 enum SystemPromptLoader {
-    /// Backwards-compatible loader that returns the main frontier-model
-    /// prompt. Used for fallbacks and the AppDelegate boot path.
     static func load() throws -> String {
         try loadResource("sharpen")
     }
 
-    /// Pick the right system prompt for the active provider. Apple
-    /// Intelligence runs a ~3B-parameter on-device model with a smaller
-    /// context window and stricter safety guardrails — it gets a
-    /// distilled prompt tuned to fit. Frontier API providers get the
-    /// full 5KB prompt that's been validated 75/75 across model
-    /// families.
+    /// Per-provider hook kept for future divergence (e.g., Ollama may
+    /// benefit from a smaller prompt for local 3-7B models). For now
+    /// every provider uses the canonical sharpen.md.
     static func load(for provider: ProviderID) -> String {
-        let primary: String
-        let fallback: String
-        switch provider {
-        case .appleIntelligence:
-            primary = "sharpen-on-device"
-            fallback = "sharpen"
-        case .openrouter, .anthropic:
-            primary = "sharpen"
-            fallback = "sharpen-on-device"
-        }
-        if let text = try? loadResource(primary), !text.isEmpty { return text }
-        if let text = try? loadResource(fallback), !text.isEmpty { return text }
+        if let text = try? loadResource("sharpen"), !text.isEmpty { return text }
         return Self.builtinFallback
     }
 

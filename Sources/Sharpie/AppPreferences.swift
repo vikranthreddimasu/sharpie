@@ -15,13 +15,7 @@ enum AppPreferences {
     static var activeProvider: ProviderID {
         get {
             let raw = UserDefaults.standard.string(forKey: Keys.activeProvider) ?? ""
-            if let stored = ProviderID(rawValue: raw) { return stored }
-            // No saved preference yet. Prefer Apple Intelligence on a
-            // capable Mac — it's free, on-device, and the install story is
-            // "open the app and start typing". Fall back to OpenRouter
-            // (BYOA, cheap-SOTA-open) on everything else.
-            if ProviderFactory.isAppleIntelligenceReady { return .appleIntelligence }
-            return .openrouter
+            return ProviderID(rawValue: raw) ?? .openrouter
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: Keys.activeProvider)

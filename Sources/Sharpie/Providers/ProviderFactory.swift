@@ -6,27 +6,10 @@ import Foundation
 //
 // Resolution order: Keychain key for the active provider, then matching
 // env var (`OPENROUTER_API_KEY` / `ANTHROPIC_API_KEY`) for `swift run`
-// development convenience. Apple Intelligence has no key — it just needs
-// to be available at the OS level.
+// development convenience.
 enum ProviderFactory {
     static func makeDefault() throws -> any LLMProvider {
         switch AppPreferences.activeProvider {
-        case .appleIntelligence:
-            #if canImport(FoundationModels)
-            if #available(macOS 26.0, *) {
-                switch AppleIntelligenceProvider.status {
-                case .ready:              return AppleIntelligenceProvider()
-                case .deviceIneligible:   throw SharpieError.appleIntelligenceDeviceIneligible
-                case .notEnabled:         throw SharpieError.appleIntelligenceNotEnabled
-                case .modelNotReady:      throw SharpieError.appleIntelligenceModelNotReady
-                case .unknown:            throw SharpieError.appleIntelligenceModelNotReady
-                }
-            }
-            throw SharpieError.appleIntelligenceUnsupportedOS
-            #else
-            throw SharpieError.appleIntelligenceUnsupportedOS
-            #endif
-
         case .openrouter:
             if let key = nonEmpty(KeychainService.get(.openrouter)) {
                 return OpenRouterProvider(apiKey: key, model: AppPreferences.openRouterModel)
@@ -45,28 +28,6 @@ enum ProviderFactory {
             }
             throw SharpieError.missingAPIKey(provider: .anthropic)
         }
-    }
-
-    /// True when Apple Intelligence is usable right now — Settings, the
-    /// first-run flow, and the empty-state view all branch on this.
-    static var isAppleIntelligenceReady: Bool {
-        #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
-            return AppleIntelligenceProvider.isReady
-        }
-        #endif
-        return false
-    }
-
-    /// True when Apple Intelligence is even an option on this build × OS.
-    /// Drives whether the provider appears in the Settings picker at all.
-    static var isAppleIntelligenceSupported: Bool {
-        #if canImport(FoundationModels)
-        if #available(macOS 26.0, *) {
-            return true
-        }
-        #endif
-        return false
     }
 
     private static func nonEmpty(_ value: String?) -> String? {

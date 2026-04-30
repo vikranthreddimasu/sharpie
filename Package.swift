@@ -18,13 +18,10 @@ let package = Package(
             name: "Sharpie",
             path: "Sources/Sharpie",
             resources: [
-                // Symlinked to ../../../prompts/*.md so the canonical
-                // files live at the repo root where contributors expect
-                // them. Frontier models use sharpen.md; the on-device
-                // Apple Intelligence path uses sharpen-on-device.md
-                // (smaller context, simpler instructions).
-                .copy("Resources/sharpen.md"),
-                .copy("Resources/sharpen-on-device.md")
+                // Symlinked to ../../../prompts/sharpen.md so the
+                // canonical file lives at the repo root where
+                // contributors expect it.
+                .copy("Resources/sharpen.md")
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5)
