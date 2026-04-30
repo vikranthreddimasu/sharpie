@@ -99,11 +99,22 @@ struct SharpenView: View {
 
     private var outputBlock: some View {
         ZStack(alignment: .topTrailing) {
-            ScrollView {
-                outputContent
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    outputContent
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                    // Sentinel anchor at the bottom of the rendered text
+                    // so we can pin the scroll position to the latest
+                    // streamed token.
+                    Color.clear.frame(height: 1).id("outputBottom")
+                }
+                .onChange(of: viewModel.output) { _, _ in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo("outputBottom", anchor: .bottom)
+                    }
+                }
             }
 
             if case .copied = viewModel.status {
