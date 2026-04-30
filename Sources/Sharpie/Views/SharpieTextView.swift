@@ -11,6 +11,10 @@ struct SharpieTextView: NSViewRepresentable {
     var fontSize: CGFloat = 15
     /// Bumped externally to pull focus into this field.
     var focusToken: Int
+    /// When false, the text view stays visible but doesn't accept edits.
+    /// We use this to lock the input while a rewrite is streaming so the
+    /// user can read what they sent without accidentally typing into it.
+    var isEditable: Bool = true
 
     /// Inset between the scroll view bounds and where the first character
     /// renders. The placeholder overlay must use these same values for the
@@ -33,7 +37,7 @@ struct SharpieTextView: NSViewRepresentable {
         textView.textColor = .labelColor
         textView.insertionPointColor = .controlAccentColor
         textView.drawsBackground = false
-        textView.isEditable = true
+        textView.isEditable = isEditable
         textView.isSelectable = true
         textView.isRichText = false
         textView.allowsUndo = true
@@ -58,6 +62,9 @@ struct SharpieTextView: NSViewRepresentable {
         guard let textView = nsView.documentView as? NSTextView else { return }
         if textView.string != text {
             textView.string = text
+        }
+        if textView.isEditable != isEditable {
+            textView.isEditable = isEditable
         }
         context.coordinator.applyFocus(focusToken)
     }

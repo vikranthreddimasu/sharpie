@@ -38,6 +38,15 @@ final class SharpenViewModel: ObservableObject {
         }
     }
 
+    /// Locked while a rewrite is streaming so the user can read what they
+    /// sent without accidentally typing into the input field.
+    var isInputEditable: Bool {
+        switch status {
+        case .streaming, .needsSetup: return false
+        case .idle, .copied, .clarifying, .error: return true
+        }
+    }
+
     var statusLine: String {
         switch status {
         case .idle:
@@ -118,6 +127,7 @@ final class SharpenViewModel: ObservableObject {
         // Determine whether this submission is the original prompt or the
         // answer to a clarify question.
         let userInput: String
+        let isClarifyAnswer: Bool
         if case .clarifying(let question, let original) = status {
             userInput = """
             Original prompt:
@@ -129,13 +139,20 @@ final class SharpenViewModel: ObservableObject {
             The user's answer:
             \(trimmed)
             """
+            isClarifyAnswer = true
         } else {
             lastOriginalInput = trimmed
             userInput = trimmed
+            isClarifyAnswer = false
         }
 
-        // Visually clear the field while the answer streams in.
-        input = ""
+        // For the original prompt: preserve the input field so the user
+        // sees what they sent while the rewrite streams. For a clarify
+        // answer: clear so the input doesn't show "src/auth.ts" while
+        // the rewritten prompt streams in below.
+        if isClarifyAnswer {
+            input = ""
+        }
         output = ""
         status = .streaming
 
