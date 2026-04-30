@@ -26,6 +26,7 @@ final class SharpenViewModel: ObservableObject {
     @Published var outputEditing: Bool = false
 
     let systemPrompt: String
+    private let historyStore: HistoryStore
 
     private var streamTask: Task<Void, Never>?
     private var lastOriginalInput: String = ""
@@ -34,13 +35,17 @@ final class SharpenViewModel: ObservableObject {
     /// edited it. Lets us compare and capture a revision when the user
     /// commits edits.
     private(set) var aiOriginalOutput: String = ""
+    /// Identifier of the current history entry. Set when finalize() runs
+    /// and is used to attach edit revisions later in the same session.
+    private var currentHistoryEntryId: UUID?
+    /// Provider + model at the moment of submit, captured so the history
+    /// entry records what produced the rewrite.
+    private var currentProvider: ProviderID = .openrouter
+    private var currentModelSlug: String?
 
-    /// Called when the user commits an edit to the output (focus leaves
-    /// the output editor). PR B will hook history persistence here.
-    var onOutputRevisionCommitted: ((String) -> Void)?
-
-    init(systemPrompt: String) {
+    init(systemPrompt: String, historyStore: HistoryStore) {
         self.systemPrompt = systemPrompt
+        self.historyStore = historyStore
     }
 
     var placeholder: String {
@@ -108,13 +113,13 @@ final class SharpenViewModel: ObservableObject {
     }
 
     /// Persist whatever the user typed in the output editor: keep it in
-    /// the clipboard, fire the revision callback (PR B writes to history),
-    /// and switch back to rendered view.
+    /// the clipboard, push a revision into the history store (if enabled
+    /// and the text actually changed), and switch back to rendered view.
     func commitOutputEdit() {
         let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
         ClipboardService.copy(trimmed.isEmpty ? output : trimmed)
-        if !trimmed.isEmpty {
-            onOutputRevisionCommitted?(output)
+        if let entryId = currentHistoryEntryId, AppPreferences.historyEnabled, !trimmed.isEmpty {
+            historyStore.appendRevision(entryId: entryId, text: trimmed)
         }
         outputEditing = false
     }
@@ -153,6 +158,7 @@ final class SharpenViewModel: ObservableObject {
         lastOriginalInput = ""
         aiOriginalOutput = ""
         outputEditing = false
+        currentHistoryEntryId = nil
     }
 
     /// ⌘Z escape hatch. Pulls the original input back into the field so the
@@ -204,6 +210,12 @@ final class SharpenViewModel: ObservableObject {
         }
         output = ""
         status = .streaming
+
+        // Capture provider/model context for history attribution.
+        currentProvider = AppPreferences.activeProvider
+        currentModelSlug = (currentProvider == .openrouter)
+            ? AppPreferences.openRouterModel
+            : nil
 
         streamTask = Task { [weak self, systemPrompt] in
             guard let self else { return }
@@ -262,6 +274,18 @@ final class SharpenViewModel: ObservableObject {
         aiOriginalOutput = trimmed
         outputEditing = false
         status = .copied
+
+        // Record the new entry. We only persist if history is enabled,
+        // and only on the *original* prompt — not on a clarify answer
+        // (the original is already attached to its own entry).
+        if AppPreferences.historyEnabled && !lastOriginalInput.isEmpty {
+            currentHistoryEntryId = historyStore.appendEntry(
+                originalInput: lastOriginalInput,
+                aiOutput: trimmed,
+                provider: currentProvider,
+                modelSlug: currentModelSlug
+            )
+        }
     }
 
     private func looksLikeClarifyingQuestion(_ text: String) -> Bool {

@@ -9,6 +9,7 @@ enum AppPreferences {
         static let activeProvider = "sharpie.activeProvider"
         static let openRouterModel = "sharpie.openRouterModel"
         static let hotkey = "sharpie.hotkey"
+        static let historyEnabled = "sharpie.historyEnabled"
     }
 
     static var activeProvider: ProviderID {
@@ -57,6 +58,21 @@ enum AppPreferences {
             guard let data = try? JSONEncoder().encode(newValue) else { return }
             UserDefaults.standard.set(data, forKey: Keys.hotkey)
         }
+    }
+
+    /// History default-on. Vikky's call (CLAUDE.md said no history; this
+    /// is a deliberate override). The Settings UI shows a Disable
+    /// toggle for the privacy-strict.
+    static var historyEnabled: Bool {
+        get {
+            // UserDefaults.bool returns false for missing keys; treat
+            // "never set" as the default-on case by checking the object.
+            if UserDefaults.standard.object(forKey: Keys.historyEnabled) == nil {
+                return true
+            }
+            return UserDefaults.standard.bool(forKey: Keys.historyEnabled)
+        }
+        set { UserDefaults.standard.set(newValue, forKey: Keys.historyEnabled) }
     }
 }
 

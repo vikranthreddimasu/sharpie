@@ -7,10 +7,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var hotkey: HotkeyService!
     private var windowController: SharpenWindowController!
+    private var historyStore: HistoryStore!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let prompt = (try? SystemPromptLoader.load()) ?? Self.fallbackPrompt
-        windowController = SharpenWindowController(systemPrompt: prompt)
+        historyStore = HistoryStore()
+        windowController = SharpenWindowController(
+            systemPrompt: prompt,
+            historyStore: historyStore
+        )
         installMainMenu()
         installStatusItem()
         installHotkey()
@@ -102,6 +107,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         openItem.target = self
         menu.addItem(openItem)
 
+        let historyItem = NSMenuItem(
+            title: "History…",
+            action: #selector(openHistory),
+            keyEquivalent: "y"
+        )
+        historyItem.target = self
+        menu.addItem(historyItem)
+
         let settingsItem = NSMenuItem(
             title: "Settings…",
             action: #selector(openSettings),
@@ -160,6 +173,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         windowController.showSettings()
+    }
+
+    @objc private func openHistory() {
+        windowController.showHistory()
     }
 
     @objc private func openAbout() {
