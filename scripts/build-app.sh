@@ -40,6 +40,13 @@ for b in .build/release/*.bundle; do
 done
 shopt -u nullglob
 
+# Generate the app icon if missing, then copy it into Resources/.
+if [ ! -f assets/AppIcon.icns ]; then
+  echo "→ generating app icon"
+  swift scripts/generate-icon.swift
+fi
+cp assets/AppIcon.icns "${APP_DIR}/Contents/Resources/AppIcon.icns"
+
 cat > "${APP_DIR}/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -53,6 +60,8 @@ cat > "${APP_DIR}/Contents/Info.plist" <<EOF
     <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
     <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
     <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundleIconName</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>${MIN_MACOS}</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
