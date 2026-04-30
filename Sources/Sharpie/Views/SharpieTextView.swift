@@ -15,6 +15,13 @@ struct SharpieTextView: NSViewRepresentable {
     /// We use this to lock the input while a rewrite is streaming so the
     /// user can read what they sent without accidentally typing into it.
     var isEditable: Bool = true
+    /// Identifier propagated to the underlying NSTextView so the
+    /// WindowController's local key monitor can tell which field has focus
+    /// (input vs output editor) when deciding what ⌘Z should do.
+    var identifier: String? = nil
+    /// Fired when editing ends (focus leaves, window resigns key, etc.).
+    /// PR B will use this to capture history revisions.
+    var onCommit: ((String) -> Void)? = nil
 
     /// Inset between the scroll view bounds and where the first character
     /// renders. The placeholder overlay must use these same values for the
@@ -52,6 +59,9 @@ struct SharpieTextView: NSViewRepresentable {
         textView.textContainer?.lineFragmentPadding = 0
         textView.autoresizingMask = [.width]
         textView.string = text
+        if let identifier {
+            textView.identifier = NSUserInterfaceItemIdentifier(identifier)
+        }
 
         scroll.documentView = textView
         context.coordinator.textView = textView
@@ -100,6 +110,11 @@ struct SharpieTextView: NSViewRepresentable {
             if parent.text != tv.string {
                 parent.text = tv.string
             }
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            parent.onCommit?(tv.string)
         }
     }
 }
