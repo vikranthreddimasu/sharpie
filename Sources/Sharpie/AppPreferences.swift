@@ -14,9 +14,13 @@ enum AppPreferences {
     static var activeProvider: ProviderID {
         get {
             let raw = UserDefaults.standard.string(forKey: Keys.activeProvider) ?? ""
-            // OpenRouter is the v0.1 default so a brand-new install lands
-            // on the BYOA-friendly path Vikky asked for.
-            return ProviderID(rawValue: raw) ?? .openrouter
+            if let stored = ProviderID(rawValue: raw) { return stored }
+            // No saved preference yet. Prefer Apple Intelligence on a
+            // capable Mac — it's free, on-device, and the install story is
+            // "open the app and start typing". Fall back to OpenRouter
+            // (BYOA, cheap-SOTA-open) on everything else.
+            if ProviderFactory.isAppleIntelligenceReady { return .appleIntelligence }
+            return .openrouter
         }
         set {
             UserDefaults.standard.set(newValue.rawValue, forKey: Keys.activeProvider)

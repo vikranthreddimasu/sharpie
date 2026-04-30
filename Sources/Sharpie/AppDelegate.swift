@@ -18,14 +18,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// If the user has no provider key on file, surface Settings on launch
-    /// so they aren't staring at a menu-bar icon with nothing to do.
+    /// so they aren't staring at a menu-bar icon with nothing to do. Apple
+    /// Intelligence skips this — when it's ready, Sharpie works out of the
+    /// box with zero configuration.
     private func firstRunFlowIfNeeded() {
         let hasOpenRouter = (KeychainService.get(.openrouter) != nil)
         let hasAnthropic  = (KeychainService.get(.anthropic) != nil)
         let envHasKey =
             ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"]?.isEmpty == false
             || ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?.isEmpty == false
-        guard !hasOpenRouter && !hasAnthropic && !envHasKey else { return }
+        let hasAppleIntelligence = ProviderFactory.isAppleIntelligenceReady
+        guard !hasOpenRouter && !hasAnthropic && !envHasKey && !hasAppleIntelligence else { return }
 
         // Defer to the next runloop tick so the status item is on screen
         // first — otherwise Settings appears with the menu bar still

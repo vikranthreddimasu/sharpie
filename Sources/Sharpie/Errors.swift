@@ -7,6 +7,12 @@ enum SharpieError: LocalizedError {
     case apiError(status: Int, message: String)
     case networkError(underlying: Error)
 
+    case appleIntelligenceUnsupportedOS
+    case appleIntelligenceDeviceIneligible
+    case appleIntelligenceNotEnabled
+    case appleIntelligenceModelNotReady
+    case appleIntelligenceGuardrail
+
     var errorDescription: String? {
         switch self {
         case .missingAPIKey(let provider):
@@ -20,6 +26,17 @@ enum SharpieError: LocalizedError {
             return "Provider error (\(status)): \(message)"
         case .networkError(let underlying):
             return "Network error: \(underlying.localizedDescription)"
+
+        case .appleIntelligenceUnsupportedOS:
+            return "Apple Intelligence requires macOS 26 (Tahoe) or later. Switch to OpenRouter or Anthropic in Settings."
+        case .appleIntelligenceDeviceIneligible:
+            return "This Mac doesn't support Apple Intelligence. Switch to OpenRouter or Anthropic in Settings."
+        case .appleIntelligenceNotEnabled:
+            return "Apple Intelligence is off. Turn it on in System Settings → Apple Intelligence & Siri, then try again."
+        case .appleIntelligenceModelNotReady:
+            return "Apple Intelligence is still downloading. Try again in a few minutes."
+        case .appleIntelligenceGuardrail:
+            return "Apple Intelligence's safety filter blocked this prompt. Rephrase, or switch to OpenRouter / Anthropic in Settings."
         }
     }
 }
