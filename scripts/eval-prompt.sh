@@ -16,7 +16,7 @@ KEY=$(security find-generic-password \
     exit 1
 }
 
-MODEL=${MODEL:-anthropic/claude-sonnet-4.5}
+MODEL=${MODEL:-minimax/minimax-m2.7}
 PROMPT_PATH="prompts/sharpen.md"
 [ -f "$PROMPT_PATH" ] || { echo "Missing $PROMPT_PATH" >&2; exit 1; }
 
