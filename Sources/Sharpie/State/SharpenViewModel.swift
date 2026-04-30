@@ -6,6 +6,7 @@ final class SharpenViewModel: ObservableObject {
 
     enum Status: Equatable {
         case idle
+        case needsSetup
         case streaming
         case copied
         case clarifying(question: String, original: String)
@@ -41,6 +42,8 @@ final class SharpenViewModel: ObservableObject {
         switch status {
         case .idle:
             return "⏎ to sharpen   ·   esc to dismiss"
+        case .needsSetup:
+            return "Add an API key to start"
         case .streaming:
             return "Sharpening…"
         case .copied:
@@ -52,14 +55,34 @@ final class SharpenViewModel: ObservableObject {
         }
     }
 
+    private var hasAnyAPIKey: Bool {
+        if KeychainService.get(.openrouter) != nil { return true }
+        if KeychainService.get(.anthropic) != nil { return true }
+        let env = ProcessInfo.processInfo.environment
+        if let v = env["OPENROUTER_API_KEY"], !v.isEmpty { return true }
+        if let v = env["ANTHROPIC_API_KEY"], !v.isEmpty { return true }
+        return false
+    }
+
     func focusInput() {
         inputFocusToken &+= 1
     }
 
     /// Called when the window is opened by the hotkey. Don't wipe the user's
-    /// in-flight input mid-stream; only reset if we're between runs.
+    /// in-flight input mid-stream; only reset if we're between runs. If no
+    /// provider key is configured, surface the empty-setup state so the user
+    /// sees what to do instead of typing into a dead input.
     func windowDidOpen() {
         if case .streaming = status { return }
+        if !hasAnyAPIKey {
+            status = .needsSetup
+            input = ""
+            output = ""
+            return
+        }
+        if case .needsSetup = status {
+            status = .idle
+        }
         focusInput()
     }
 
@@ -88,6 +111,7 @@ final class SharpenViewModel: ObservableObject {
     }
 
     func submit() {
+        if case .needsSetup = status { return }
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
