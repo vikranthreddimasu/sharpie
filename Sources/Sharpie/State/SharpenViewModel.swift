@@ -18,12 +18,26 @@ final class SharpenViewModel: ObservableObject {
     @Published var status: Status = .idle
     /// Bumped when the input field should retake focus (e.g., after revert).
     @Published var inputFocusToken: Int = 0
+    /// Bumped when the output editor should take focus (e.g., user clicked
+    /// "Edit" on the output area).
+    @Published var outputFocusToken: Int = 0
+    /// True when the output area is in editable mode (user is tweaking the
+    /// rewrite before pasting). False = rendered markdown view.
+    @Published var outputEditing: Bool = false
 
     let systemPrompt: String
 
     private var streamTask: Task<Void, Never>?
     private var lastOriginalInput: String = ""
     private var hasAskedQuestion: Bool = false
+    /// The original AI output for the current rewrite, before the user
+    /// edited it. Lets us compare and capture a revision when the user
+    /// commits edits.
+    private(set) var aiOriginalOutput: String = ""
+
+    /// Called when the user commits an edit to the output (focus leaves
+    /// the output editor). PR B will hook history persistence here.
+    var onOutputRevisionCommitted: ((String) -> Void)?
 
     init(systemPrompt: String) {
         self.systemPrompt = systemPrompt
@@ -78,6 +92,33 @@ final class SharpenViewModel: ObservableObject {
         inputFocusToken &+= 1
     }
 
+    func focusOutput() {
+        outputFocusToken &+= 1
+    }
+
+    /// Toggle the output area between rendered markdown view and editable
+    /// plain-text mode. Called from the Edit/Done button in SharpenView.
+    func toggleOutputEditing() {
+        if outputEditing {
+            commitOutputEdit()
+        } else {
+            outputEditing = true
+            focusOutput()
+        }
+    }
+
+    /// Persist whatever the user typed in the output editor: keep it in
+    /// the clipboard, fire the revision callback (PR B writes to history),
+    /// and switch back to rendered view.
+    func commitOutputEdit() {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        ClipboardService.copy(trimmed.isEmpty ? output : trimmed)
+        if !trimmed.isEmpty {
+            onOutputRevisionCommitted?(output)
+        }
+        outputEditing = false
+    }
+
     /// Called when the window is opened by the hotkey. Don't wipe the user's
     /// in-flight input mid-stream; only reset if we're between runs. If no
     /// provider key is configured, surface the empty-setup state so the user
@@ -98,6 +139,11 @@ final class SharpenViewModel: ObservableObject {
 
     /// Called when the window is dismissed. Cancels in-flight work and resets.
     func windowDidClose() {
+        // If the user dismissed mid-edit, treat it like a commit so the
+        // final state still gets persisted.
+        if outputEditing {
+            commitOutputEdit()
+        }
         streamTask?.cancel()
         streamTask = nil
         input = ""
@@ -105,6 +151,8 @@ final class SharpenViewModel: ObservableObject {
         status = .idle
         hasAskedQuestion = false
         lastOriginalInput = ""
+        aiOriginalOutput = ""
+        outputEditing = false
     }
 
     /// ⌘Z escape hatch. Pulls the original input back into the field so the
@@ -211,6 +259,8 @@ final class SharpenViewModel: ObservableObject {
 
         ClipboardService.copy(trimmed)
         output = trimmed
+        aiOriginalOutput = trimmed
+        outputEditing = false
         status = .copied
     }
 

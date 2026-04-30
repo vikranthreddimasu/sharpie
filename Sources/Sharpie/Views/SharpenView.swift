@@ -88,7 +88,8 @@ struct SharpenView: View {
             SharpieTextView(
                 text: $viewModel.input,
                 focusToken: viewModel.inputFocusToken,
-                isEditable: viewModel.isInputEditable
+                isEditable: viewModel.isInputEditable,
+                identifier: "sharpieInput"
             )
             .frame(minHeight: 36, maxHeight: 90)
         }
@@ -99,15 +100,29 @@ struct SharpenView: View {
     // MARK: - Output
 
     private var outputBlock: some View {
+        ZStack(alignment: .topTrailing) {
+            outputBody
+            outputControls
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private var outputBody: some View {
+        if case .copied = viewModel.status, viewModel.outputEditing {
+            outputEditor
+        } else {
+            outputViewer
+        }
+    }
+
+    private var outputViewer: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 outputContent
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
                     .padding(.vertical, 16)
-                // Sentinel anchor at the bottom of the rendered text
-                // so we can pin the scroll position to the latest
-                // streamed token.
                 Color.clear.frame(height: 1).id("outputBottom")
             }
             .onChange(of: viewModel.output) { _, _ in
@@ -116,7 +131,52 @@ struct SharpenView: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var outputEditor: some View {
+        SharpieTextView(
+            text: $viewModel.output,
+            focusToken: viewModel.outputFocusToken,
+            isEditable: true,
+            identifier: "sharpieOutput",
+            onCommit: { _ in
+                viewModel.commitOutputEdit()
+            }
+        )
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    @ViewBuilder
+    private var outputControls: some View {
+        if case .copied = viewModel.status {
+            Button(action: viewModel.toggleOutputEditing) {
+                HStack(spacing: 4) {
+                    Image(systemName: viewModel.outputEditing
+                          ? "checkmark"
+                          : "pencil")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text(viewModel.outputEditing ? "Done" : "Edit")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundStyle(viewModel.outputEditing ? Color.white : Color.primary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    Capsule().fill(
+                        viewModel.outputEditing
+                            ? Color.accentColor
+                            : Color.secondary.opacity(0.18)
+                    )
+                )
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 10)
+            .padding(.trailing, 12)
+            .help(viewModel.outputEditing
+                  ? "Save your edits and switch back to the rendered view"
+                  : "Edit the rewrite before pasting")
+        }
     }
 
     @ViewBuilder
@@ -131,11 +191,18 @@ struct SharpenView: View {
                     .font(.system(size: 14))
                     .textSelection(.enabled)
             }
-        case .streaming, .copied:
+        case .streaming:
+            // While streaming we render plain text — markdown parsing
+            // mid-stream produces flicker as the AI types unbalanced
+            // bold/italic markers.
             Text(viewModel.output)
                 .font(.system(size: 14))
                 .textSelection(.enabled)
                 .lineSpacing(2)
+        case .copied:
+            MarkdownText(source: viewModel.output)
+                .font(.system(size: 14))
+                .textSelection(.enabled)
         case .error(let message):
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Image(systemName: "exclamationmark.triangle.fill")
