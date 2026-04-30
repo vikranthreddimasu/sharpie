@@ -1,6 +1,6 @@
 import Foundation
 
-enum ProviderID: String, CaseIterable, Identifiable, Sendable {
+enum ProviderID: String, CaseIterable, Codable, Identifiable, Sendable {
     case appleIntelligence
     case openrouter
     case anthropic

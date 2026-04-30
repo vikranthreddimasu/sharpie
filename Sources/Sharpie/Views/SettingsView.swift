@@ -19,6 +19,7 @@ struct SettingsView: View {
 
     @State private var hotkey: KeyCombo
     @State private var launchAtLogin: Bool
+    @State private var historyEnabled: Bool
 
     @State private var savedAt: Date? = nil
 
@@ -37,6 +38,7 @@ struct SettingsView: View {
         self._anthropicReplaceMode = State(initialValue: !anthropicStored)
         self._hotkey = State(initialValue: AppPreferences.hotkey)
         self._launchAtLogin = State(initialValue: LaunchAtLoginService.isEnabled)
+        self._historyEnabled = State(initialValue: AppPreferences.historyEnabled)
         self.onClose = onClose
     }
 
@@ -46,13 +48,14 @@ struct SettingsView: View {
                 header
                 providerCard
                 shortcutsCard
+                historyCard
                 if LaunchAtLoginService.isAvailable {
                     appCard
                 }
             }
             .padding(22)
         }
-        .frame(width: 540, height: 580)
+        .frame(width: 540, height: 640)
         .safeAreaInset(edge: .bottom) {
             footer
                 .padding(.horizontal, 22)
@@ -293,6 +296,28 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: - History card
+
+    private var historyCard: some View {
+        SettingsCard(title: "History") {
+            Toggle(isOn: $historyEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Save sharpened prompts").font(.subheadline.weight(.medium))
+                    Text("Stored locally in ~/Library/Application Support/Sharpie/history.json with user-only file permissions. Never sent anywhere. Up to 500 entries.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            HStack(spacing: 8) {
+                Text("Open with **History…** in the menu bar or **⌘Y** when the menu is showing.")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                Spacer()
+            }
+        }
+    }
+
     // MARK: - App card (Login Items)
 
     private var appCard: some View {
@@ -430,6 +455,9 @@ struct SettingsView: View {
         if LaunchAtLoginService.isAvailable && launchAtLogin != LaunchAtLoginService.isEnabled {
             LaunchAtLoginService.set(launchAtLogin)
         }
+
+        // History toggle.
+        AppPreferences.historyEnabled = historyEnabled
 
         savedAt = Date()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {

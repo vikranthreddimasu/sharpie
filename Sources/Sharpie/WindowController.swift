@@ -21,13 +21,19 @@ final class SharpenWindowController {
     private static let windowWidth: CGFloat = 600
 
     let viewModel: SharpenViewModel
+    let historyStore: HistoryStore
     private var window: FocusableWindow?
     private var settingsWindow: NSWindow?
+    private var historyWindow: NSWindow?
     private var localKeyMonitor: Any?
     private var observers: Set<AnyCancellable> = []
 
-    init(systemPrompt: String) {
-        self.viewModel = SharpenViewModel(systemPrompt: systemPrompt)
+    init(systemPrompt: String, historyStore: HistoryStore) {
+        self.historyStore = historyStore
+        self.viewModel = SharpenViewModel(
+            systemPrompt: systemPrompt,
+            historyStore: historyStore
+        )
         // Adapt the window when state changes OR when output grows
         // (streaming chunks, edits).
         let trigger = Publishers.CombineLatest3(
@@ -243,6 +249,29 @@ final class SharpenWindowController {
     }
 
     // MARK: - Settings window
+
+    func showHistory() {
+        if historyWindow == nil {
+            let w = NSWindow(
+                contentRect: NSRect(origin: .zero, size: NSSize(width: 760, height: 520)),
+                styleMask: [.titled, .closable, .resizable, .miniaturizable],
+                backing: .buffered,
+                defer: false
+            )
+            w.title = "Sharpie History"
+            w.minSize = NSSize(width: 720, height: 460)
+            w.isReleasedWhenClosed = false
+            historyWindow = w
+        }
+        let view = HistoryView(
+            store: historyStore,
+            onClose: { [weak self] in self?.historyWindow?.close() }
+        )
+        historyWindow?.contentView = NSHostingView(rootView: view)
+        historyWindow?.center()
+        historyWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
     func showSettings() {
         if settingsWindow == nil {
