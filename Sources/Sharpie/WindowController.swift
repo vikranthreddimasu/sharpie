@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 // Borderless windows can't become key/main by default. Subclassing fixes that.
@@ -10,13 +11,28 @@ final class FocusableWindow: NSWindow {
 @MainActor
 final class SharpenWindowController {
 
+    // The window collapses to compact when there's nothing to render below
+    // the input, expands when streaming, copied, clarifying, or showing an
+    // error. Anchored at the top so the user's eye doesn't have to chase it.
+    private static let compactHeight: CGFloat = 110
+    private static let expandedHeight: CGFloat = 360
+    private static let windowWidth: CGFloat = 600
+
     private let viewModel: SharpenViewModel
     private var window: FocusableWindow?
     private var settingsWindow: NSWindow?
     private var localKeyMonitor: Any?
+    private var statusObserver: AnyCancellable?
 
     init(systemPrompt: String) {
         self.viewModel = SharpenViewModel(systemPrompt: systemPrompt)
+        statusObserver = viewModel.$status
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                guard let self, let window = self.window else { return }
+                self.adjustSize(for: status, animated: window.isVisible)
+            }
     }
 
     // MARK: - Main window
@@ -32,6 +48,7 @@ final class SharpenWindowController {
     func show() {
         if window == nil { buildMainWindow() }
         guard let window else { return }
+        adjustSize(for: viewModel.status, animated: false)
         center(window)
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -46,7 +63,7 @@ final class SharpenWindowController {
     }
 
     private func buildMainWindow() {
-        let initialSize = NSSize(width: 600, height: 360)
+        let initialSize = NSSize(width: Self.windowWidth, height: Self.compactHeight)
         let w = FocusableWindow(
             contentRect: NSRect(origin: .zero, size: initialSize),
             styleMask: [.borderless, .fullSizeContentView],
@@ -60,6 +77,7 @@ final class SharpenWindowController {
         w.isMovableByWindowBackground = true
         w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         w.titlebarAppearsTransparent = true
+        w.animationBehavior = .utilityWindow
 
         let root = SharpenView(
             viewModel: viewModel,
@@ -74,21 +92,47 @@ final class SharpenWindowController {
     }
 
     private func center(_ w: NSWindow) {
+        // Center horizontally, sit slightly above vertical center — closer
+        // to where the user's eye lives when they invoke the hotkey.
         let screen = NSScreen.main ?? NSScreen.screens.first
         guard let visible = screen?.visibleFrame else { return }
         let f = w.frame
         let origin = NSPoint(
             x: visible.midX - f.width / 2,
-            y: visible.midY - f.height / 2 + 60 // sit slightly above center
+            y: visible.midY - f.height / 2 + 100
         )
         w.setFrameOrigin(origin)
     }
 
+    /// Resizes the window to match the viewmodel state. Anchored to the
+    /// window's current top edge so the input doesn't jump under the cursor
+    /// when the output area expands.
+    private func adjustSize(for status: SharpenViewModel.Status, animated: Bool) {
+        guard let window else { return }
+        let target = needsExpansion(status) ? Self.expandedHeight : Self.compactHeight
+        let current = window.frame
+        guard abs(current.height - target) > 0.5 else { return }
+        let topY = current.origin.y + current.height
+        let newOrigin = NSPoint(x: current.origin.x, y: topY - target)
+        let newFrame = NSRect(
+            origin: newOrigin,
+            size: NSSize(width: Self.windowWidth, height: target)
+        )
+        window.setFrame(newFrame, display: true, animate: animated)
+    }
+
+    private func needsExpansion(_ status: SharpenViewModel.Status) -> Bool {
+        switch status {
+        case .idle: return false
+        case .streaming, .copied, .clarifying, .error: return true
+        }
+    }
+
     // MARK: - Local key handling
 
-    // The clean way to map Esc/⌘Z without burdening every SwiftUI view with
-    // .keyboardShortcut. Local monitor only fires while our window is key, so
-    // we don't fight the user's shortcuts elsewhere.
+    // The clean way to map Esc/⌘Z/Return without burdening every SwiftUI view
+    // with .keyboardShortcut. Local monitor only fires while our window is
+    // key, so we don't fight the user's shortcuts elsewhere.
     private func installKeyMonitor() {
         guard localKeyMonitor == nil else { return }
         localKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
@@ -110,10 +154,18 @@ final class SharpenWindowController {
             hide()
             return nil
         }
-        // ⌘Z → revert to original input.
+        // ⌘Z → revert to original input, but only when there's a rewrite or
+        // clarify question on screen. While the user is still typing the
+        // original (idle), let ⌘Z fall through so the text view's normal
+        // undo works for typing mistakes.
         if event.keyCode == 6 && event.modifierFlags.contains(.command) {
-            viewModel.revertToOriginal()
-            return nil
+            switch viewModel.status {
+            case .copied, .clarifying:
+                viewModel.revertToOriginal()
+                return nil
+            case .idle, .streaming, .error:
+                return event
+            }
         }
         // Return (no Shift) → submit, or dismiss when the rewrite is already
         // copied. Shift+Return falls through so TextEditor inserts a newline.
