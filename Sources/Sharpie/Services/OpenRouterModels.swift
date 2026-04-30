@@ -51,20 +51,29 @@ final class OpenRouterModelDirectory: ObservableObject {
         }
     }
 
-    /// Returns a sensible default model id given the loaded list. Prefers
-    /// the canonical default if it exists, then any Anthropic Sonnet, then
-    /// any Anthropic, then a popular OpenAI model.
+    /// Returns a sensible default model id given the loaded list. Always
+    /// stays in the cheap-SOTA-open lane — Vikky explicitly does not want
+    /// Sharpie auto-selecting Anthropic or OpenAI frontier slugs on his
+    /// account. Order of preference: the canonical default, then any
+    /// minimax m2 variant, then any recent Qwen, then DeepSeek, then any
+    /// minimax, then a last-resort first-in-list.
     static func preferredDefault(in models: [OpenRouterModel]) -> String? {
         if let m = models.first(where: { $0.id == AppPreferences.defaultOpenRouterModel }) {
             return m.id
         }
-        if let m = models.first(where: { $0.id.hasPrefix("anthropic/") && $0.id.contains("sonnet") }) {
+        if let m = models.first(where: { $0.id.hasPrefix("minimax/") && $0.id.contains("m2") }) {
             return m.id
         }
-        if let m = models.first(where: { $0.id.hasPrefix("anthropic/") }) {
+        if let m = models.first(where: { $0.id.hasPrefix("qwen/") && $0.id.contains("3.6") }) {
             return m.id
         }
-        if let m = models.first(where: { $0.id.hasPrefix("openai/") && $0.id.contains("gpt-4") }) {
+        if let m = models.first(where: { $0.id.hasPrefix("qwen/") && $0.id.contains("coder") }) {
+            return m.id
+        }
+        if let m = models.first(where: { $0.id.hasPrefix("deepseek/") }) {
+            return m.id
+        }
+        if let m = models.first(where: { $0.id.hasPrefix("minimax/") }) {
             return m.id
         }
         return models.first?.id
