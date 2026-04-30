@@ -229,8 +229,8 @@ private struct HistoryRow: View {
 
     private func providerBadge(for entry: HistoryEntry) -> String {
         switch entry.provider {
-        case .appleIntelligence: return "Apple Intelligence"
-        case .anthropic:         return "Anthropic"
+        case .anthropic:
+            return "Anthropic"
         case .openrouter:
             return entry.modelSlug.map { "OR · \($0)" } ?? "OpenRouter"
         }
@@ -274,8 +274,8 @@ private struct HistoryDetailView: View {
 
     private var providerBadge: String {
         switch entry.provider {
-        case .appleIntelligence: return "Apple Intelligence (on-device)"
-        case .anthropic:         return "Anthropic · Claude Sonnet"
+        case .anthropic:
+            return "Anthropic · Claude Sonnet"
         case .openrouter:
             return entry.modelSlug.map { "OpenRouter · \($0)" } ?? "OpenRouter"
         }

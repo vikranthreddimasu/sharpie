@@ -80,14 +80,12 @@ struct SettingsView: View {
     private var providerCard: some View {
         SettingsCard(title: "Provider") {
             Picker("", selection: $activeProvider) {
-                ForEach(availableProviders) { Text($0.displayName).tag($0) }
+                ForEach(ProviderID.allCases) { Text($0.displayName).tag($0) }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
 
             switch activeProvider {
-            case .appleIntelligence:
-                appleIntelligenceBlock
             case .openrouter:
                 openRouterKeyBlock
                 modelBlock
@@ -95,86 +93,6 @@ struct SettingsView: View {
                 anthropicKeyBlock
             }
         }
-    }
-
-    /// Apple Intelligence only appears in the picker on a build × OS that
-    /// can actually use it. On older toolchains or older macOS, the
-    /// segmented picker stays at OpenRouter / Anthropic and the user
-    /// sees the original v0.1 UI.
-    private var availableProviders: [ProviderID] {
-        ProviderID.allCases.filter { id in
-            switch id {
-            case .appleIntelligence: return ProviderFactory.isAppleIntelligenceSupported
-            case .openrouter, .anthropic: return true
-            }
-        }
-    }
-
-    private var appleIntelligenceBlock: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            fieldLabel(
-                "On-device, no API key",
-                hint: "Runs entirely on your Mac through Apple's Foundation Models framework. Free, private, no network."
-            )
-            appleIntelligenceStatusRow
-        }
-    }
-
-    @ViewBuilder
-    private var appleIntelligenceStatusRow: some View {
-        let (icon, tint, message, action) = appleIntelligenceStatus
-        HStack(spacing: 8) {
-            Image(systemName: icon).foregroundStyle(tint).font(.caption)
-            Text(message).font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            if let action {
-                Button(action.title, action: action.run).controlSize(.small)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(Color.secondary.opacity(0.15))
-        )
-    }
-
-    /// Resolves the live availability of Apple Intelligence to the bits the
-    /// status row needs: an SF Symbol, a tint, a human message, and an
-    /// optional action button (e.g., "Open System Settings").
-    private var appleIntelligenceStatus: (icon: String, tint: Color, message: String, action: AppleIntelligenceAction?) {
-        if !ProviderFactory.isAppleIntelligenceSupported {
-            return (
-                "exclamationmark.triangle.fill",
-                .orange,
-                "Apple Intelligence requires macOS 26 (Tahoe) or later.",
-                nil
-            )
-        }
-        if ProviderFactory.isAppleIntelligenceReady {
-            return ("checkmark.seal.fill", .green, "Ready — model is on device.", nil)
-        }
-        // Supported on this OS but not currently usable. Surface what to
-        // do about it.
-        let openSettings = AppleIntelligenceAction(title: "Open System Settings…") {
-            if let url = URL(string: "x-apple.systempreferences:com.apple.AppleIntelligence-Settings.extension") {
-                NSWorkspace.shared.open(url)
-            } else {
-                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:")!)
-            }
-        }
-        return (
-            "exclamationmark.triangle.fill",
-            .orange,
-            "Apple Intelligence isn't ready. Turn it on in System Settings or wait for the model to finish downloading.",
-            openSettings
-        )
-    }
-
-    private struct AppleIntelligenceAction {
-        let title: String
-        let run: () -> Void
     }
 
     private var openRouterKeyBlock: some View {
@@ -411,10 +329,6 @@ struct SettingsView: View {
 
     private var canSave: Bool {
         switch activeProvider {
-        case .appleIntelligence:
-            // No key required. Saving is always allowed — the user is just
-            // confirming their provider choice (and possibly the hotkey).
-            return true
         case .openrouter:
             if openRouterStored && !openRouterReplaceMode { return true }
             return !newOpenRouterKey.trimmingCharacters(in: .whitespaces).isEmpty
