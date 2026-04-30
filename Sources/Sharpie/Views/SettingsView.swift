@@ -28,6 +28,9 @@ struct SettingsView: View {
 
     @StateObject private var modelDirectory = OpenRouterModelDirectory()
     @StateObject private var ollamaDirectory = OllamaModelDirectory()
+    @StateObject private var ollamaStarter = OllamaDaemonStarter()
+    @State private var ollamaCatalogPresented: Bool = false
+    @State private var didAutoSurfaceCatalog: Bool = false
 
     let onClose: () -> Void
 
@@ -71,13 +74,53 @@ struct SettingsView: View {
         }
         .task {
             await modelDirectory.fetch()
-            await refreshOllamaDirectory()
+            await connectToOllama()
+        }
+        .sheet(isPresented: $ollamaCatalogPresented) {
+            if let url = parsedOllamaURL {
+                OllamaCatalogView(
+                    directory: ollamaDirectory,
+                    baseURL: url,
+                    onClose: { ollamaCatalogPresented = false }
+                )
+            }
         }
     }
 
+    private var parsedOllamaURL: URL? {
+        let trimmed = ollamaURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), url.scheme != nil, url.host != nil else { return nil }
+        return url
+    }
+
+    /// One-shot: probe the daemon, auto-launch Ollama.app if installed
+    /// and not running, then refresh the model directory once we're
+    /// ready. Idempotent — safe to call repeatedly.
+    private func connectToOllama() async {
+        guard let url = parsedOllamaURL else { return }
+        await ollamaStarter.startIfNeeded(baseURL: url)
+        if case .ready = ollamaStarter.status {
+            await ollamaDirectory.fetch(baseURL: url)
+            surfaceCatalogIfNoModels()
+        }
+    }
+
+    /// First time the user lands in Settings with Ollama active and
+    /// the daemon connected but zero models, auto-pop the catalog.
+    /// One time per Settings session — they can dismiss it without
+    /// us hassling them again.
+    private func surfaceCatalogIfNoModels() {
+        guard !didAutoSurfaceCatalog,
+              activeProvider == .ollama,
+              case .loaded(let models) = ollamaDirectory.state,
+              models.isEmpty
+        else { return }
+        didAutoSurfaceCatalog = true
+        ollamaCatalogPresented = true
+    }
+
     private func refreshOllamaDirectory() async {
-        guard let url = URL(string: ollamaURL.trimmingCharacters(in: .whitespacesAndNewlines)),
-              url.scheme != nil, url.host != nil else { return }
+        guard let url = parsedOllamaURL else { return }
         await ollamaDirectory.fetch(baseURL: url)
     }
 
@@ -108,6 +151,13 @@ struct SettingsView: View {
                 anthropicKeyBlock
             case .ollama:
                 ollamaBlock
+            }
+        }
+        .onChange(of: activeProvider) { _, new in
+            // Switching into Ollama from another provider mid-Settings:
+            // start the daemon and (if needed) surface the catalog.
+            if new == .ollama {
+                Task { await connectToOllama() }
             }
         }
     }
@@ -196,55 +246,120 @@ struct SettingsView: View {
 
     // MARK: - Ollama
 
+    @ViewBuilder
     private var ollamaBlock: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            fieldLabel(
-                "Server URL",
-                hint: "Local default is http://localhost:11434. Run `ollama serve` or open the Ollama app first."
-            )
-            HStack(spacing: 6) {
-                TextField("http://localhost:11434", text: $ollamaURL)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                    .onSubmit {
-                        Task { await refreshOllamaDirectory() }
-                    }
-                Button {
-                    Task { await refreshOllamaDirectory() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .help("Refresh installed model list")
-            }
-
-            fieldLabel(
-                "Model",
-                hint: "Pulled live from \(ollamaURL.isEmpty ? "the server" : ollamaURL)/api/tags. Install more with `ollama pull <model>`."
-            )
-            ollamaModelPicker
+        if !OllamaInstallation.isInstalled {
+            ollamaNotInstalledRow
+        } else {
+            ollamaStatusRow
+            ollamaModelRow
+            ollamaActionsRow
         }
     }
 
-    @ViewBuilder
-    private var ollamaModelPicker: some View {
-        switch ollamaDirectory.state {
-        case .idle, .loading:
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small).scaleEffect(0.7)
-                Text("Loading models…").font(.caption).foregroundStyle(.secondary)
-            }
-            .frame(height: 28)
-        case .loaded(let models):
-            if models.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("No models installed yet on this Ollama server.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text("Run `ollama pull llama3.1` (or another) and click ⟳ to refresh.")
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+    /// "Not installed" empty state. Pitches the value, points at the
+    /// download. We don't fall back to the URL field here — if Ollama
+    /// isn't on this Mac, surfacing technical config would be noise.
+    private var ollamaNotInstalledRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "bolt.horizontal.circle")
+                    .foregroundStyle(.tint)
+                    .font(.system(size: 16))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Run AI on your Mac, free and private.")
+                        .font(.subheadline.weight(.medium))
+                    Text("No API keys, no cloud round-trip, your prompts never leave the device.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-            } else {
+            }
+            Button {
+                NSWorkspace.shared.open(OllamaInstallation.downloadURL)
+            } label: {
+                Label("Get Ollama for Mac", systemImage: "arrow.down.circle")
+                    .padding(.horizontal, 4)
+            }
+            .buttonStyle(.borderedProminent)
+            Text("Sharpie will auto-detect Ollama after install — no further setup.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.secondary.opacity(0.12))
+        )
+    }
+
+    /// Live status of the daemon. Reflects whatever
+    /// OllamaDaemonStarter is doing right now.
+    @ViewBuilder
+    private var ollamaStatusRow: some View {
+        let (icon, tint, title, subtitle, showSpinner) = ollamaStatusContent
+        HStack(alignment: .top, spacing: 10) {
+            Group {
+                if showSpinner {
+                    ProgressView().controlSize(.small).scaleEffect(0.7)
+                } else {
+                    Image(systemName: icon).foregroundStyle(tint).font(.system(size: 15))
+                }
+            }
+            .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.subheadline.weight(.medium))
+                Text(subtitle)
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.secondary.opacity(0.12))
+        )
+    }
+
+    private var ollamaStatusContent: (icon: String, tint: Color, title: String, subtitle: String, spinner: Bool) {
+        switch ollamaStarter.status {
+        case .idle, .probing:
+            return ("circle.dotted", .secondary, "Looking for Ollama…", "One moment.", true)
+        case .launching:
+            return ("bolt.fill", .yellow, "Launching Ollama", "Sharpie launched the Ollama app for you. The menu-bar icon will appear shortly.", true)
+        case .waiting:
+            return ("hourglass", .yellow, "Waiting for Ollama", "Daemon is starting up. This usually takes a few seconds.", true)
+        case .ready:
+            let count = installedCount
+            let host = parsedOllamaURL?.host ?? "localhost"
+            let port = parsedOllamaURL?.port.map(String.init) ?? "11434"
+            let modelLine: String
+            switch count {
+            case 0: modelLine = "No models installed yet."
+            case 1: modelLine = "1 model on your Mac."
+            default: modelLine = "\(count) models on your Mac."
+            }
+            return ("checkmark.seal.fill", .green, "Connected to Ollama", "\(host):\(port) · \(modelLine)", false)
+        case .unreachable(let reason):
+            return ("exclamationmark.triangle.fill", .orange, "Ollama isn't responding", reason, false)
+        }
+    }
+
+    private var installedCount: Int {
+        if case .loaded(let models) = ollamaDirectory.state { return models.count }
+        return 0
+    }
+
+    @ViewBuilder
+    private var ollamaModelRow: some View {
+        if case .loaded(let models) = ollamaDirectory.state, !models.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                fieldLabel("Active model", hint: "Used for new rewrites. Switch any time.")
                 Picker("", selection: $ollamaModel) {
                     ForEach(models, id: \.id) { model in
                         Text(model.id)
@@ -261,16 +376,53 @@ struct SettingsView: View {
                     }
                 }
             }
-        case .failed(let message):
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Couldn't reach Ollama: \(message)")
-                    .font(.caption).foregroundStyle(.orange)
-                Text("Type a model slug below — it'll be used as-is.")
-                    .font(.caption).foregroundStyle(.tertiary)
-                TextField(AppPreferences.defaultOllamaModel, text: $ollamaModel)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
+        }
+    }
+
+    @ViewBuilder
+    private var ollamaActionsRow: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Button {
+                    ollamaCatalogPresented = true
+                } label: {
+                    Label("Browse and install models…", systemImage: "square.stack.3d.down.right")
+                        .padding(.horizontal, 4)
+                }
+                .buttonStyle(.bordered)
+                .disabled(parsedOllamaURL == nil)
+
+                Spacer()
+
+                Button {
+                    Task { await connectToOllama() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Re-check daemon status and refresh installed models")
             }
+
+            // Hidden by default — most users run Ollama on localhost.
+            // Surfaced here for the power user who points Sharpie at a
+            // remote Ollama instance behind a reverse proxy.
+            DisclosureGroup("Advanced") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Server URL")
+                        .font(.caption.weight(.medium))
+                        .padding(.top, 4)
+                    TextField("http://localhost:11434", text: $ollamaURL)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(.body, design: .monospaced))
+                        .onSubmit {
+                            Task { await connectToOllama() }
+                        }
+                    Text("Default is the local Ollama daemon. Override for a remote host.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .font(.caption)
         }
     }
 
