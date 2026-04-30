@@ -67,6 +67,9 @@ final class SharpenViewModel: ObservableObject {
     }
 
     var statusLine: String {
+        if outputEditing {
+            return "Editing   ·   ⌘Z to undo   ·   click Done or esc to save"
+        }
         switch status {
         case .idle:
             return "⏎ to sharpen   ·   esc to dismiss"

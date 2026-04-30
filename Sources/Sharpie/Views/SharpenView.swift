@@ -91,7 +91,9 @@ struct SharpenView: View {
                 isEditable: viewModel.isInputEditable,
                 identifier: "sharpieInput"
             )
-            .frame(minHeight: 36, maxHeight: 90)
+            // 140pt fits ~5 wrapped lines comfortably; longer inputs
+            // scroll within the field via the overlay scroller.
+            .frame(minHeight: 36, maxHeight: 140)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -100,9 +102,9 @@ struct SharpenView: View {
     // MARK: - Output
 
     private var outputBlock: some View {
-        ZStack(alignment: .topTrailing) {
-            outputBody
+        VStack(spacing: 0) {
             outputControls
+            outputBody
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -147,36 +149,47 @@ struct SharpenView: View {
         .padding(.vertical, 10)
     }
 
+    /// Dedicated toolbar row above the output content. Hosts the
+    /// Edit/Done button (and could host Copy / Regenerate later). Sits
+    /// outside the text reading area so it never overlaps the rewrite.
     @ViewBuilder
     private var outputControls: some View {
         if case .copied = viewModel.status {
-            Button(action: viewModel.toggleOutputEditing) {
-                HStack(spacing: 4) {
-                    Image(systemName: viewModel.outputEditing
-                          ? "checkmark"
-                          : "pencil")
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(viewModel.outputEditing ? "Done" : "Edit")
-                        .font(.system(size: 11, weight: .medium))
-                }
-                .foregroundStyle(viewModel.outputEditing ? Color.white : Color.primary)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    Capsule().fill(
-                        viewModel.outputEditing
-                            ? Color.accentColor
-                            : Color.secondary.opacity(0.18)
-                    )
-                )
+            HStack(spacing: 8) {
+                Spacer()
+                editToggleButton
             }
-            .buttonStyle(.plain)
-            .padding(.top, 10)
-            .padding(.trailing, 12)
-            .help(viewModel.outputEditing
-                  ? "Save your edits and switch back to the rendered view"
-                  : "Edit the rewrite before pasting")
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 4)
         }
+    }
+
+    private var editToggleButton: some View {
+        Button(action: viewModel.toggleOutputEditing) {
+            HStack(spacing: 4) {
+                Image(systemName: viewModel.outputEditing
+                      ? "checkmark"
+                      : "pencil")
+                    .font(.system(size: 10, weight: .semibold))
+                Text(viewModel.outputEditing ? "Done" : "Edit")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .foregroundStyle(viewModel.outputEditing ? Color.white : Color.primary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule().fill(
+                    viewModel.outputEditing
+                        ? Color.accentColor
+                        : Color.secondary.opacity(0.18)
+                )
+            )
+        }
+        .buttonStyle(.plain)
+        .help(viewModel.outputEditing
+              ? "Save your edits and switch back to the rendered view"
+              : "Edit the rewrite before pasting")
     }
 
     @ViewBuilder
