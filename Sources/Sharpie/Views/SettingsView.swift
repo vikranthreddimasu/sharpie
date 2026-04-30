@@ -21,9 +21,13 @@ struct SettingsView: View {
     @State private var launchAtLogin: Bool
     @State private var historyEnabled: Bool
 
+    @State private var ollamaURL: String
+    @State private var ollamaModel: String
+
     @State private var savedAt: Date? = nil
 
     @StateObject private var modelDirectory = OpenRouterModelDirectory()
+    @StateObject private var ollamaDirectory = OllamaModelDirectory()
 
     let onClose: () -> Void
 
@@ -39,6 +43,8 @@ struct SettingsView: View {
         self._hotkey = State(initialValue: AppPreferences.hotkey)
         self._launchAtLogin = State(initialValue: LaunchAtLoginService.isEnabled)
         self._historyEnabled = State(initialValue: AppPreferences.historyEnabled)
+        self._ollamaURL = State(initialValue: AppPreferences.ollamaURL)
+        self._ollamaModel = State(initialValue: AppPreferences.ollamaModel)
         self.onClose = onClose
     }
 
@@ -63,7 +69,16 @@ struct SettingsView: View {
                 .background(.thinMaterial)
                 .overlay(Divider().opacity(0.3), alignment: .top)
         }
-        .task { await modelDirectory.fetch() }
+        .task {
+            await modelDirectory.fetch()
+            await refreshOllamaDirectory()
+        }
+    }
+
+    private func refreshOllamaDirectory() async {
+        guard let url = URL(string: ollamaURL.trimmingCharacters(in: .whitespacesAndNewlines)),
+              url.scheme != nil, url.host != nil else { return }
+        await ollamaDirectory.fetch(baseURL: url)
     }
 
     private var header: some View {
@@ -91,6 +106,8 @@ struct SettingsView: View {
                 modelBlock
             case .anthropic:
                 anthropicKeyBlock
+            case .ollama:
+                ollamaBlock
             }
         }
     }
@@ -174,6 +191,93 @@ struct SettingsView: View {
                     placeholder: "sk-ant-…"
                 )
             }
+        }
+    }
+
+    // MARK: - Ollama
+
+    private var ollamaBlock: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            fieldLabel(
+                "Server URL",
+                hint: "Local default is http://localhost:11434. Run `ollama serve` or open the Ollama app first."
+            )
+            HStack(spacing: 6) {
+                TextField("http://localhost:11434", text: $ollamaURL)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                    .onSubmit {
+                        Task { await refreshOllamaDirectory() }
+                    }
+                Button {
+                    Task { await refreshOllamaDirectory() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh installed model list")
+            }
+
+            fieldLabel(
+                "Model",
+                hint: "Pulled live from \(ollamaURL.isEmpty ? "the server" : ollamaURL)/api/tags. Install more with `ollama pull <model>`."
+            )
+            ollamaModelPicker
+        }
+    }
+
+    @ViewBuilder
+    private var ollamaModelPicker: some View {
+        switch ollamaDirectory.state {
+        case .idle, .loading:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small).scaleEffect(0.7)
+                Text("Loading models…").font(.caption).foregroundStyle(.secondary)
+            }
+            .frame(height: 28)
+        case .loaded(let models):
+            if models.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("No models installed yet on this Ollama server.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("Run `ollama pull llama3.1` (or another) and click ⟳ to refresh.")
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                }
+            } else {
+                Picker("", selection: $ollamaModel) {
+                    ForEach(models, id: \.id) { model in
+                        Text(model.id)
+                            .font(.system(.body, design: .monospaced))
+                            .tag(model.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .onAppear { applyOllamaDefault(in: models) }
+                .onChange(of: ollamaDirectory.state) { _, _ in
+                    if case .loaded(let m) = ollamaDirectory.state {
+                        applyOllamaDefault(in: m)
+                    }
+                }
+            }
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Couldn't reach Ollama: \(message)")
+                    .font(.caption).foregroundStyle(.orange)
+                Text("Type a model slug below — it'll be used as-is.")
+                    .font(.caption).foregroundStyle(.tertiary)
+                TextField(AppPreferences.defaultOllamaModel, text: $ollamaModel)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+            }
+        }
+    }
+
+    private func applyOllamaDefault(in models: [OllamaModel]) {
+        guard !models.isEmpty else { return }
+        if !models.contains(where: { $0.id == ollamaModel }) {
+            ollamaModel = models.first?.id ?? ollamaModel
         }
     }
 
@@ -329,6 +433,11 @@ struct SettingsView: View {
 
     private var canSave: Bool {
         switch activeProvider {
+        case .ollama:
+            let trimmedURL = ollamaURL.trimmingCharacters(in: .whitespaces)
+            let trimmedModel = ollamaModel.trimmingCharacters(in: .whitespaces)
+            guard let url = URL(string: trimmedURL), url.scheme != nil, url.host != nil else { return false }
+            return !trimmedModel.isEmpty
         case .openrouter:
             if openRouterStored && !openRouterReplaceMode { return true }
             return !newOpenRouterKey.trimmingCharacters(in: .whitespaces).isEmpty
@@ -357,6 +466,8 @@ struct SettingsView: View {
         }
         AppPreferences.openRouterModel = openRouterModel
         AppPreferences.activeProvider = activeProvider
+        AppPreferences.ollamaURL = ollamaURL
+        AppPreferences.ollamaModel = ollamaModel
 
         // Hotkey: persist + tell AppDelegate to re-register live.
         let oldHotkey = AppPreferences.hotkey

@@ -9,6 +9,9 @@ enum KeychainService {
     enum Account: String {
         case anthropic = "anthropic.api_key"
         case openrouter = "openrouter.api_key"
+        /// Optional bearer token for Ollama instances behind auth.
+        /// Empty for the common case (local daemon, no auth).
+        case ollama = "ollama.bearer_token"
     }
 
     @discardableResult

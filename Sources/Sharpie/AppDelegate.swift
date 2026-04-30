@@ -25,6 +25,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// If the user has no provider key on file, surface Settings on launch
     /// so they aren't staring at a menu-bar icon with nothing to do.
     private func firstRunFlowIfNeeded() {
+        // Ollama doesn't need a key — if the user already picked it,
+        // skip the auto-Settings popup. They'll see a clean error if
+        // the daemon isn't actually running on the configured URL.
+        if AppPreferences.activeProvider == .ollama { return }
         let hasOpenRouter = (KeychainService.get(.openrouter) != nil)
         let hasAnthropic  = (KeychainService.get(.anthropic) != nil)
         let envHasKey =
