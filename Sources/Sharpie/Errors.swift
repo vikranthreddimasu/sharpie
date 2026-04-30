@@ -1,7 +1,7 @@
 import Foundation
 
 enum SharpieError: LocalizedError {
-    case missingAPIKey
+    case missingAPIKey(provider: ProviderID)
     case promptResourceNotFound
     case invalidResponse
     case apiError(status: Int, message: String)
@@ -9,14 +9,15 @@ enum SharpieError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingAPIKey:
-            return "No API key set. Open Sharpie's menu and add your Anthropic key."
+        case .missingAPIKey(let provider):
+            return "No \(provider.displayName) API key set. Open Sharpie's menu → Settings… and add it."
         case .promptResourceNotFound:
             return "Couldn't load the system prompt. Reinstall Sharpie."
         case .invalidResponse:
             return "Got a response Sharpie didn't understand."
         case .apiError(let status, let message):
-            return "Anthropic API error (\(status)): \(message)"
+            if status == 0 { return message }
+            return "Provider error (\(status)): \(message)"
         case .networkError(let underlying):
             return "Network error: \(underlying.localizedDescription)"
         }

@@ -44,11 +44,11 @@ final class SharpenViewModel: ObservableObject {
         case .streaming:
             return "Sharpening…"
         case .copied:
-            return "Copied to clipboard   ·   ⏎ or esc to dismiss   ·   ⌘Z to undo"
+            return "Copied   ·   ⏎ or esc to dismiss   ·   ⌘Z to undo"
         case .clarifying:
-            return "One question, then Enter to send the answer"
-        case .error(let message):
-            return message
+            return "Answer in one line, then ⏎"
+        case .error:
+            return "⏎ to retry   ·   esc to dismiss"
         }
     }
 
