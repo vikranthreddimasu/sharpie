@@ -35,5 +35,9 @@ enum AppPreferences {
         }
     }
 
-    static let defaultOpenRouterModel = "anthropic/claude-sonnet-4.5"
+    // Cheap SOTA-open default. Vikky pays per token through OpenRouter and
+    // explicitly does not want Sharpie defaulting to Anthropic Sonnet or
+    // GPT-4-class models — minimax 2.7 hits 15/15 on the eval at a fraction
+    // of the cost. The model picker lets users override.
+    static let defaultOpenRouterModel = "minimax/minimax-m2.7"
 }
