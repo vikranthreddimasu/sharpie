@@ -81,7 +81,11 @@ final class SharpenWindowController {
 
         let root = SharpenView(
             viewModel: viewModel,
-            onDismiss: { [weak self] in self?.hide() }
+            onDismiss: { [weak self] in self?.hide() },
+            onOpenSettings: { [weak self] in
+                self?.hide()
+                self?.showSettings()
+            }
         )
         let host = NSHostingView(rootView: root)
         host.frame = NSRect(origin: .zero, size: initialSize)
@@ -124,7 +128,7 @@ final class SharpenWindowController {
     private func needsExpansion(_ status: SharpenViewModel.Status) -> Bool {
         switch status {
         case .idle: return false
-        case .streaming, .copied, .clarifying, .error: return true
+        case .needsSetup, .streaming, .copied, .clarifying, .error: return true
         }
     }
 
@@ -163,7 +167,7 @@ final class SharpenWindowController {
             case .copied, .clarifying:
                 viewModel.revertToOriginal()
                 return nil
-            case .idle, .streaming, .error:
+            case .idle, .streaming, .error, .needsSetup:
                 return event
             }
         }
@@ -176,6 +180,10 @@ final class SharpenWindowController {
             case .copied:
                 hide()
                 return nil
+            case .needsSetup:
+                // Let the SwiftUI default-action button (Open Settings) handle
+                // Return — fall through so the responder chain delivers it.
+                return event
             case .idle, .clarifying, .error:
                 viewModel.submit()
                 return nil

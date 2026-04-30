@@ -3,16 +3,15 @@ import SwiftUI
 struct SharpenView: View {
     @ObservedObject var viewModel: SharpenViewModel
     let onDismiss: () -> Void
+    let onOpenSettings: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            inputBlock
-            if showsOutputArea {
-                Divider().opacity(0.35)
-                outputBlock
+        Group {
+            if case .needsSetup = viewModel.status {
+                setupView
+            } else {
+                primaryView
             }
-            Divider().opacity(0.35)
-            statusBar
         }
         .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -24,9 +23,46 @@ struct SharpenView: View {
         .animation(.easeInOut(duration: 0.18), value: statusKey)
     }
 
+    private var primaryView: some View {
+        VStack(spacing: 0) {
+            inputBlock
+            if showsOutputArea {
+                Divider().opacity(0.35)
+                outputBlock
+            }
+            Divider().opacity(0.35)
+            statusBar
+        }
+    }
+
+    private var setupView: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "key.fill")
+                .font(.system(size: 28))
+                .foregroundStyle(.tint)
+            VStack(spacing: 4) {
+                Text("Welcome to Sharpie")
+                    .font(.title3.weight(.semibold))
+                Text("Add an API key to start sharpening prompts.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            Button(action: onOpenSettings) {
+                Label("Open Settings", systemImage: "gearshape.fill")
+                    .padding(.horizontal, 6)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(28)
+    }
+
     private var showsOutputArea: Bool {
         switch viewModel.status {
-        case .idle: return false
+        case .idle, .needsSetup: return false
         case .streaming, .copied, .clarifying, .error: return true
         }
     }
@@ -63,11 +99,22 @@ struct SharpenView: View {
 
     private var outputBlock: some View {
         ZStack(alignment: .topTrailing) {
-            ScrollView {
-                outputContent
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    outputContent
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+                    // Sentinel anchor at the bottom of the rendered text
+                    // so we can pin the scroll position to the latest
+                    // streamed token.
+                    Color.clear.frame(height: 1).id("outputBottom")
+                }
+                .onChange(of: viewModel.output) { _, _ in
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        proxy.scrollTo("outputBottom", anchor: .bottom)
+                    }
+                }
             }
 
             if case .copied = viewModel.status {
@@ -106,7 +153,7 @@ struct SharpenView: View {
                     .font(.system(size: 13))
                     .textSelection(.enabled)
             }
-        case .idle:
+        case .idle, .needsSetup:
             EmptyView()
         }
     }
@@ -116,6 +163,7 @@ struct SharpenView: View {
     private var statusKey: String {
         switch viewModel.status {
         case .idle: return "idle"
+        case .needsSetup: return "needsSetup"
         case .streaming: return "streaming"
         case .copied: return "copied"
         case .clarifying: return "clarifying"
