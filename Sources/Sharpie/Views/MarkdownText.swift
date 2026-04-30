@@ -169,9 +169,12 @@ struct MarkdownText: View {
             sawDigit = true
             idx = trimmed.index(after: idx)
         }
-        guard sawDigit, idx < trimmed.endIndex, trimmed[idx] == "." else { return nil }
-        let afterDot = trimmed.index(after: idx)
-        guard afterDot < trimmed.endIndex, trimmed[afterDot] == " " else { return nil }
-        return String(trimmed[trimmed.index(after: afterDot)...])
+        // Accept either "1. " or "1) " — AIs use both.
+        guard sawDigit, idx < trimmed.endIndex,
+              trimmed[idx] == "." || trimmed[idx] == ")"
+        else { return nil }
+        let afterSeparator = trimmed.index(after: idx)
+        guard afterSeparator < trimmed.endIndex, trimmed[afterSeparator] == " " else { return nil }
+        return String(trimmed[trimmed.index(after: afterSeparator)...])
     }
 }

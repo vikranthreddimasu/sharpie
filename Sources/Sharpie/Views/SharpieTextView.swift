@@ -31,12 +31,17 @@ struct SharpieTextView: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let scroll = NSScrollView()
         scroll.drawsBackground = false
-        scroll.hasVerticalScroller = false
+        // Modern macOS overlay scrollers fade in only when the user
+        // actively scrolls. autohidesScrollers means they disappear when
+        // there's nothing to scroll. The result: zero visual noise on a
+        // short input, an unobtrusive bar that lets a long input still
+        // be reached.
+        scroll.hasVerticalScroller = true
         scroll.hasHorizontalScroller = false
         scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
         scroll.borderType = .noBorder
         scroll.verticalScrollElasticity = .allowed
-        scroll.scrollerStyle = .overlay
 
         let textView = NSTextView()
         textView.delegate = context.coordinator
