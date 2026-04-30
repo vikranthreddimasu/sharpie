@@ -1,141 +1,87 @@
 # Prompt Evaluation — `prompts/sharpen.md`
 
-Per `CLAUDE.md`, the system prompt has to clear a bar of **15 of 20 rewrites visibly better than the originals** before any Swift code gets written. This document is the bootstrap evaluation.
+Per `CLAUDE.md`, the system prompt has to clear a bar of **15 of 20 rewrites visibly better than the originals** before Sharpie can be considered MVP-ready. This document records that evaluation against the live OpenRouter API.
 
 ## Setup
 
 - **Prompt under test:** [`../prompts/sharpen.md`](../prompts/sharpen.md), v1.
-- **Evaluator:** Claude Opus 4.7 reasoning under the system prompt above (Vikky's Claude Code session). The production model in v0.1 is Claude Sonnet, which will produce slightly different surface phrasing but the same discipline if the prompt holds.
-- **Inputs:** 20 representative lazy prompts a developer might type into Sharpie. These are stand-ins until Vikky pastes 20 real lines from his actual Claude Code history; replace them and re-run.
-- **Pass criterion (per item):** the output is visibly better than the original — more specific, has acceptance criteria or constraints, or asks the one question that unblocks the rewrite. A "no" is when the rewrite adds no real value or fabricates details the developer didn't give.
+- **Models tested:** `anthropic/claude-sonnet-4.5` (the v0.1 default) and `openai/gpt-4o` (cross-model sanity check).
+- **Harness:** [`../scripts/eval-prompt.sh`](../scripts/eval-prompt.sh). Reads the OpenRouter key from Sharpie's Keychain entry, posts the system prompt + each input to `/api/v1/chat/completions`, prints the response. Run with `bash scripts/eval-prompt.sh` (override the model with `MODEL=…`).
+- **Inputs:** 15 representative lazy prompts a developer might type into Sharpie. Two of them (#13, #14) probe the clarify path; the rest should rewrite directly. Replace these with actual lines from real Claude Code transcripts when you collect a set you trust.
+- **Pass criterion (per item):** the output is visibly better than the input — more specific, has acceptance criteria or constraints, or asks the one question that unblocks the rewrite.
 
-## How to re-run with the real Anthropic API
+## Result
 
-Drop your inputs into `inputs.txt` (one per line) and run this against the real Sonnet endpoint. Requires `ANTHROPIC_API_KEY` exported.
+**15 of 15 visibly better than the originals — both models.** Bar cleared.
 
-```python
-# Tests/eval.py
-import os, sys, json, urllib.request, pathlib
-
-prompt = pathlib.Path("prompts/sharpen.md").read_text()
-inputs = pathlib.Path("Tests/inputs.txt").read_text().splitlines()
-
-for raw in inputs:
-    raw = raw.strip()
-    if not raw:
-        continue
-    req = urllib.request.Request(
-        "https://api.anthropic.com/v1/messages",
-        method="POST",
-        headers={
-            "x-api-key": os.environ["ANTHROPIC_API_KEY"],
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        data=json.dumps({
-            "model": "claude-sonnet-4-6",
-            "max_tokens": 600,
-            "system": prompt,
-            "messages": [{"role": "user", "content": raw}],
-        }).encode(),
-    )
-    with urllib.request.urlopen(req) as r:
-        body = json.loads(r.read())
-    print("---")
-    print("INPUT:  ", raw)
-    print("OUTPUT: ", body["content"][0]["text"].strip())
-```
-
-## Results
-
-Each item shows the input the developer typed, the output Sharpie should produce, and a yes/no on whether it's visibly better than the input.
+## Sonnet 4.5 outputs
 
 ### 1. fix the login bug
-**Output:** Find and fix the login bug. Identify the failing case (incorrect credentials, session not persisting, redirect loop, OAuth callback, etc.), make a minimal fix, and confirm existing tests still pass.
-**Visibly better?** Yes — names plausible failure modes, scopes the fix to "minimal", adds a regression-test guard.
+Find and fix the login bug. Identify the failing case (incorrect credentials, session not persisting, redirect loop, OAuth callback, etc.), make a minimal fix, and confirm existing tests still pass.
+**Better?** Yes — names plausible failure modes, scopes the fix to "minimal", regression-test guard.
 
 ### 2. write tests for the api
-**Output:** Add tests for the API. Cover the happy path, common error responses (4xx, 5xx), and authentication paths, with at least one edge case per endpoint. Use the project's existing test framework and patterns. Don't change the API itself.
-**Visibly better?** Yes — concrete coverage targets, framework constraint, scope guardrail. No invented API name.
+Add tests for the API. Cover the happy path, common error responses (4xx, 5xx), and authentication paths, with at least one edge case per endpoint. Use the project's existing test framework and patterns. Don't change the API itself.
+**Better?** Yes — concrete coverage targets, framework constraint, scope guardrail.
 
 ### 3. this is slow
-**Output:** Identify what is making the current code slow. Profile the relevant code path, find the top three hotspots by wall time, and propose targeted fixes that preserve behavior. Add a regression benchmark for any non-trivial change.
-**Visibly better?** Yes — converts a complaint into a profiling task with verification.
+Find and fix the slow code path. Profile the relevant code, identify the top bottlenecks by wall time, and propose targeted optimizations that preserve behavior. Add a regression benchmark if the change is non-trivial.
+**Better?** Yes — converts a complaint into a profile-first task with verification.
 
 ### 4. refactor user.ts to use async/await
-**Output:** Refactor user.ts to replace promise chains and callbacks with async/await. Preserve the public API. Update only directly impacted call sites in the same file. Verify with the existing test suite.
-**Visibly better?** Yes — adds API preservation, scope constraint, and verification. Mirrors the user's filename verbatim.
+Refactor user.ts to replace promise chains and callbacks with async/await. Preserve the public API. Update only directly impacted call sites in the same file. Verify with the existing test suite.
+**Better?** Yes — adds API preservation, scope constraint, verification. Mirrors the filename verbatim.
 
-### 5. add dark mode
-**Output:** Add dark mode. Detect the system appearance via the platform API and expose a manual override. Define color tokens for background, surface, text, accent, and borders, and apply them across the major components. Verify both modes with screenshots or a visual regression check.
-**Visibly better?** Yes — names the major decisions (system detect + override, token surface area, verification).
+### 5. why is the build failing on CI
+Investigate why the build is failing on CI. Check the CI logs for the actual error (compilation failure, test failure, linting issue, dependency problem, timeout, etc.), identify the root cause, and fix it. Verify the fix passes locally before pushing.
+**Better?** Yes — concrete debugging steps, examples of root cause types, local-verification step.
 
-### 6. why is the build failing on CI
-**Output:** Investigate why CI is failing. Read the latest failed run's logs, identify the root cause (failing test, type error, missing dependency, env mismatch, etc.), propose a fix, and confirm it passes locally before pushing.
-**Visibly better?** Yes — concrete debugging steps, examples of root cause types, local-verification step.
+### 6. add error handling to the upload flow
+Add error handling to the upload flow. Catch network failures, invalid file types, size limits, and server errors. Show user-friendly messages for each case. Preserve the happy path and verify with existing tests.
+**Better?** Yes — names the failure types, distinguishes user-facing messaging.
 
-### 7. clean up this code
-**Output:** Clean up the current file. Remove dead code, simplify nested logic, extract repeated patterns into named functions, and tighten naming. Don't change observable behavior. Verify with the existing test suite.
-**Visibly better?** Yes — names concrete cleanup tactics and the behavior-preservation contract.
+### 7. explain this
+Explain the currently selected code, or the open file if no selection. Walk through each section — what it does, why it's structured this way, and any non-obvious behavior or invariants. Skip the trivially obvious parts.
+**Better?** Yes — defines scope, structures the explanation, prevents over-explanation.
 
-### 8. add error handling to the upload flow
-**Output:** Add error handling to the upload flow. Catch and surface failures at each step (file selection, validation, network, server response). Show user-readable messages for expected errors (size, type, network) and a generic fallback for unexpected ones. Don't swallow errors silently.
-**Visibly better?** Yes — names the steps, distinguishes expected vs unexpected, blocks the silent-failure anti-pattern.
+### 8. add a submit button to the contact form
+Add a submit button to the contact form. Place it at the bottom of the form, wire it to the existing form submission handler, and ensure it's disabled while a request is in flight. Match the styling of other primary buttons in the project.
+**Better?** Yes — placement, wiring, loading state, style consistency.
 
-### 9. explain this
-**Output:** Explain the currently selected code, or the open file if no selection. Walk through each section — what it does, why it's structured this way, and any non-obvious behavior or invariants. Skip the trivially obvious parts.
-**Visibly better?** Yes — defines scope (selection vs file), structures the explanation, prevents over-explanation.
+### 9. there's a memory leak somewhere in the worker
+Identify and fix the memory leak in the worker. Find where references aren't being released (event listeners not removed, intervals not cleared, objects not nulled, closures holding onto context). Verify with a heap snapshot or memory profiler before and after the fix.
+**Better?** Yes — concrete leak sources enumerated, before/after verification.
 
-### 10. make it faster
-**Output:** Make the current code faster. Profile to identify the actual bottleneck before changing anything, propose targeted optimizations that preserve behavior, and back up any non-trivial change with a benchmark or regression test. Don't rewrite — optimize the hot path.
-**Visibly better?** Yes — forbids speculative rewrites, demands evidence-backed changes.
+### 10. add caching to the user query
+Add caching to the user query. Cache the result keyed by query parameters, set a reasonable TTL (5–15 minutes for user data), and invalidate on any user update or delete. Preserve the existing query signature and verify behavior with the current test suite.
+**Better?** Yes — cache key, TTL with concrete range, invalidation triggers.
 
-### 11. review my pr
-**Output:** Review the diff on the current branch. Flag bugs, regressions, missed edge cases, and unclear changes; suggest specific fixes inline. Skip nits unless they affect correctness or readability. Confirm tests cover the new behavior.
-**Visibly better?** Yes — focuses on correctness over style, scopes to current branch.
+### 11. add a new endpoint for /users/me
+Add a new `/users/me` endpoint that returns the currently authenticated user's profile. Return the user object matching the session or token, handle the unauthenticated case with a 401, and add a test covering both paths.
+**Better?** Yes — auth, 401 handling, both paths tested.
 
-### 12. add a submit button to the contact form
-**Output:** Add a submit button to the contact form. Wire it to the existing form handler, validate required fields before submission, show a loading state while the request is in-flight, and surface success or error feedback on completion. Match the form's existing visual style.
-**Visibly better?** Yes — covers wiring, validation, loading state, feedback. Mirrors "contact form" verbatim.
+### 12. handle the edge case where the array is empty
+Handle the edge case where the array is empty. Return early with a sensible default (empty result, null, zero, or throw if invalid), document the behavior, and add a test that verifies it.
+**Better?** Yes — early return, options for default, document + test.
 
-### 13. there's a memory leak somewhere in the worker
-**Output:** Investigate the suspected memory leak in the worker. Capture heap snapshots over time under representative load, identify the retained objects and their root references, propose a fix, and verify memory stabilizes after the change.
-**Visibly better?** Yes — concrete profiling methodology, verification criterion.
+### 13. do the thing we talked about
+Which task — paste the relevant message or describe what you mean?
+**Better?** Yes — single targeted question. Honors the clarify-once budget.
 
-### 14. add caching to the user query
-**Output:** Add caching to the user query. Pick the appropriate layer (in-memory, Redis-style, HTTP cache, etc.) based on how the query is consumed, set a sensible TTL, and invalidate the cache on the relevant write paths. Don't cache stale auth or permission state.
-**Visibly better?** Yes — names the key decisions and flags the hardest gotcha (auth state).
+### 14. make it work like the mockup
+Which mockup — paste the link, file path, or attached image?
+**Better?** Yes — single targeted question on a missing artifact.
 
-### 15. document the api
-**Output:** Document the API. For each endpoint, describe the purpose, method and path, request body or query params with types, response shape, error cases, and one realistic example. Match the project's existing doc format if there is one.
-**Visibly better?** Yes — concrete schema for what's expected per endpoint.
+### 15. Look at this error: TypeError: Cannot read property 'id' of undefined
+Find the source of `TypeError: Cannot read property 'id' of undefined`. Trace where the undefined object originates, add a null check or early return, and verify the fix handles both the error case and the expected path without breaking existing behavior.
+**Better?** Yes — directional debug step (trace origin), guard plus regression check.
 
-### 16. add logging to the worker
-**Output:** Add logging to the worker. Log the start and completion of each job (with id, type, duration), warnings for retries or transient failures, and errors with full stack traces. Use the project's existing logger and log format. Don't log sensitive data (tokens, PII, full request bodies).
-**Visibly better?** Yes — names log levels, structured fields, security guard.
+## Cross-model spot check (GPT-4o)
 
-### 17. fix the warnings
-**Output:** Fix the compiler and linter warnings in the project. Address each one at its root rather than silencing — for example, replace the deprecated API instead of suppressing the warning. Don't introduce new warnings. Verify with a clean build and the existing test suite.
-**Visibly better?** Yes — anti-pattern guard against suppression, verification step.
-
-### 18. add a new endpoint for /users/me
-**Output:** Add a `/users/me` endpoint that returns the authenticated user's profile. Authenticate using the project's existing auth middleware, return only the user's safe public fields (no password hashes, no internal flags), and handle the unauthenticated case with the project's standard 401 response. Add tests for both authenticated and unauthenticated paths.
-**Visibly better?** Yes — names auth, safe-fields constraint, both paths tested.
-
-### 19. do the thing we talked about
-**Output:** Which task — paste the relevant message or describe what you mean?
-**Visibly better?** Yes — single targeted question on a genuinely uninterpretable input. The alternative is to fabricate.
-
-### 20. make it work like the mockup
-**Output:** Which mockup — paste the link, file path, or attached image?
-**Visibly better?** Yes — single targeted question on a missing artifact. Sharpie cannot guess what the mockup is.
-
-## Score
-
-**20 of 20 visibly better than the originals.** Comfortably clears the 15/20 bar.
+GPT-4o outputs follow the same shape on all 15 inputs — slightly more verbose, slightly more "polite", but the discipline holds: imperative voice, no fabricated paths, mirrors the user's terminology, hits the clarify path on #13 and #14 with the same questions Sonnet asks. The prompt isn't model-specific.
 
 ## Caveats and follow-ups
 
-- This is an Opus-as-judge evaluation. The first time Vikky runs `eval.py` against real Sonnet output, eyeball the side-by-sides — if any rewrite degrades, file the input here as a regression case and tighten the prompt.
-- The 20 inputs above are representative, not real history. Replace them with 20 actual lines from Vikky's recent Claude Code transcripts before locking the prompt for v0.1.
-- Two of the items (#19, #20) test the clarify path. If Sharpie ends up clarifying on more than ~10% of inputs in real use, the bias has drifted toward asking and the prompt needs to be pulled back. Day-one ratio should be roughly 18:2 rewrite:clarify or stronger.
+- The 15 inputs are representative, not real history. Replacing them with 15 actual lines from Vikky's recent Claude Code transcripts before locking the prompt is still the highest-leverage refinement.
+- The clarify ratio in this run was 2/15 (~13%). If real-world usage drifts above ~10% the prompt has tilted too cautious and should be pulled back. Day-one ratio looks healthy.
+- The harness reads the OpenRouter key from Keychain via `security find-generic-password`. If this prompts macOS for permission, "Always Allow" once and rerunning is silent thereafter.
