@@ -14,6 +14,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         installMainMenu()
         installStatusItem()
         installHotkey()
+        firstRunFlowIfNeeded()
+    }
+
+    /// If the user has no provider key on file, surface Settings on launch
+    /// so they aren't staring at a menu-bar icon with nothing to do.
+    private func firstRunFlowIfNeeded() {
+        let hasOpenRouter = (KeychainService.get(.openrouter) != nil)
+        let hasAnthropic  = (KeychainService.get(.anthropic) != nil)
+        let envHasKey =
+            ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"]?.isEmpty == false
+            || ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?.isEmpty == false
+        guard !hasOpenRouter && !hasAnthropic && !envHasKey else { return }
+
+        // Defer to the next runloop tick so the status item is on screen
+        // first — otherwise Settings appears with the menu bar still
+        // resolving and feels jumpy.
+        DispatchQueue.main.async { [weak self] in
+            self?.windowController.showSettings()
+        }
     }
 
     /// .accessory apps don't show a menu bar, but they still need a main
@@ -90,6 +109,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        let aboutItem = NSMenuItem(
+            title: "About Sharpie",
+            action: #selector(openAbout),
+            keyEquivalent: ""
+        )
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
+        menu.addItem(.separator())
+
         let quitItem = NSMenuItem(
             title: "Quit Sharpie",
             action: #selector(NSApplication.terminate(_:)),
@@ -103,11 +132,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func installHotkey() {
         hotkey = HotkeyService()
-        hotkey.register(
-            keyCode: DefaultHotkey.keyCode,
-            modifiers: DefaultHotkey.modifiers
-        ) { [weak self] in
+        hotkey.register(combo: AppPreferences.hotkey) { [weak self] in
             self?.toggleWindow()
+        }
+
+        // Re-register when the user changes the shortcut in Settings —
+        // no app restart needed.
+        NotificationCenter.default.addObserver(
+            forName: .sharpieHotkeyDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.hotkey.register(combo: AppPreferences.hotkey) {
+                    self?.toggleWindow()
+                }
+            }
         }
     }
 
@@ -117,6 +157,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         windowController.showSettings()
+    }
+
+    @objc private func openAbout() {
+        // .accessory apps don't get the standard about panel "for free"
+        // through the app menu; we present it manually with explicit
+        // attribution so the panel is consistent regardless of how the
+        // build was bundled.
+        let credits = NSAttributedString(
+            string: "MIT licensed.\nSystem prompt: prompts/sharpen.md\ngithub.com/vikranthreddimasu/sharpie",
+            attributes: [.font: NSFont.systemFont(ofSize: 11)]
+        )
+        NSApp.orderFrontStandardAboutPanel(options: [
+            NSApplication.AboutPanelOptionKey.applicationName: "Sharpie",
+            NSApplication.AboutPanelOptionKey.applicationVersion: "0.1",
+            NSApplication.AboutPanelOptionKey.version: "0.1.0",
+            NSApplication.AboutPanelOptionKey.credits: credits,
+            NSApplication.AboutPanelOptionKey(rawValue: "Copyright"):
+                "MIT — Vikranth Reddimasu"
+        ])
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private static let fallbackPrompt: String = """

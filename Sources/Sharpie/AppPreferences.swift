@@ -8,6 +8,7 @@ enum AppPreferences {
     private enum Keys {
         static let activeProvider = "sharpie.activeProvider"
         static let openRouterModel = "sharpie.openRouterModel"
+        static let hotkey = "sharpie.hotkey"
     }
 
     static var activeProvider: ProviderID {
@@ -40,4 +41,23 @@ enum AppPreferences {
     // GPT-4-class models — minimax 2.7 hits 15/15 on the eval at a fraction
     // of the cost. The model picker lets users override.
     static let defaultOpenRouterModel = "minimax/minimax-m2.7"
+
+    static var hotkey: KeyCombo {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: Keys.hotkey),
+                  let combo = try? JSONDecoder().decode(KeyCombo.self, from: data)
+            else { return .default }
+            return combo
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            UserDefaults.standard.set(data, forKey: Keys.hotkey)
+        }
+    }
+}
+
+extension Notification.Name {
+    /// Posted from SettingsView when the user saves a new hotkey. AppDelegate
+    /// re-registers without an app restart.
+    static let sharpieHotkeyDidChange = Notification.Name("ai.sharpie.hotkeyDidChange")
 }
