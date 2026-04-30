@@ -233,6 +233,8 @@ private struct HistoryRow: View {
             return "Anthropic"
         case .openrouter:
             return entry.modelSlug.map { "OR · \($0)" } ?? "OpenRouter"
+        case .ollama:
+            return entry.modelSlug.map { "Ollama · \($0)" } ?? "Ollama"
         }
     }
 }
@@ -278,6 +280,8 @@ private struct HistoryDetailView: View {
             return "Anthropic · Claude Sonnet"
         case .openrouter:
             return entry.modelSlug.map { "OpenRouter · \($0)" } ?? "OpenRouter"
+        case .ollama:
+            return entry.modelSlug.map { "Ollama · \($0)" } ?? "Ollama"
         }
     }
 

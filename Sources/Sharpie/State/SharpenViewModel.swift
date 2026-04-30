@@ -87,6 +87,10 @@ final class SharpenViewModel: ObservableObject {
     }
 
     private var hasUsableProvider: Bool {
+        // Ollama doesn't need a key — if the user picked it as their
+        // active provider, treat as configured. Submit time will surface
+        // a friendly error if the daemon isn't running.
+        if AppPreferences.activeProvider == .ollama { return true }
         if KeychainService.get(.openrouter) != nil { return true }
         if KeychainService.get(.anthropic) != nil { return true }
         let env = ProcessInfo.processInfo.environment
@@ -215,9 +219,11 @@ final class SharpenViewModel: ObservableObject {
 
         // Capture provider/model context for history attribution.
         currentProvider = AppPreferences.activeProvider
-        currentModelSlug = (currentProvider == .openrouter)
-            ? AppPreferences.openRouterModel
-            : nil
+        switch currentProvider {
+        case .openrouter: currentModelSlug = AppPreferences.openRouterModel
+        case .ollama:     currentModelSlug = AppPreferences.ollamaModel
+        case .anthropic:  currentModelSlug = nil
+        }
 
         // Resolve the system prompt for the *currently selected*
         // provider — Apple Intelligence gets a smaller on-device-tuned

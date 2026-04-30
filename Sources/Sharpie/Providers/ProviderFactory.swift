@@ -27,6 +27,21 @@ enum ProviderFactory {
                 return AnthropicProvider(apiKey: key)
             }
             throw SharpieError.missingAPIKey(provider: .anthropic)
+
+        case .ollama:
+            let urlString = AppPreferences.ollamaURL
+            guard let url = URL(string: urlString), url.scheme != nil, url.host != nil else {
+                throw SharpieError.ollamaInvalidURL(urlString)
+            }
+            // Optional bearer for users who put auth in front of their
+            // Ollama daemon. Empty for the standard local case.
+            let bearer = nonEmpty(KeychainService.get(.ollama))
+                ?? envKey("OLLAMA_API_KEY")
+            return OllamaProvider(
+                baseURL: url,
+                model: AppPreferences.ollamaModel,
+                apiKey: bearer
+            )
         }
     }
 

@@ -10,6 +10,8 @@ enum AppPreferences {
         static let openRouterModel = "sharpie.openRouterModel"
         static let hotkey = "sharpie.hotkey"
         static let historyEnabled = "sharpie.historyEnabled"
+        static let ollamaURL = "sharpie.ollamaURL"
+        static let ollamaModel = "sharpie.ollamaModel"
     }
 
     static var activeProvider: ProviderID {
@@ -40,6 +42,42 @@ enum AppPreferences {
     // GPT-4-class models — minimax 2.7 hits 15/15 on the eval at a fraction
     // of the cost. The model picker lets users override.
     static let defaultOpenRouterModel = "minimax/minimax-m2.7"
+
+    /// The local Ollama daemon's default bind address. Override in
+    /// Settings if Ollama is running on a different port or a remote
+    /// host behind a reverse proxy.
+    static let defaultOllamaURL = "http://localhost:11434"
+
+    /// Reasonable starter model for Sharpie's task — small, fast, and
+    /// widely pre-pulled. The model picker shows whatever is actually
+    /// installed; this is just the placeholder before a pick is made.
+    static let defaultOllamaModel = "llama3.1:latest"
+
+    static var ollamaURL: String {
+        get {
+            let stored = UserDefaults.standard.string(forKey: Keys.ollamaURL)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let stored, !stored.isEmpty { return stored }
+            return defaultOllamaURL
+        }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            UserDefaults.standard.set(trimmed, forKey: Keys.ollamaURL)
+        }
+    }
+
+    static var ollamaModel: String {
+        get {
+            let stored = UserDefaults.standard.string(forKey: Keys.ollamaModel)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let stored, !stored.isEmpty { return stored }
+            return defaultOllamaModel
+        }
+        set {
+            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            UserDefaults.standard.set(trimmed, forKey: Keys.ollamaModel)
+        }
+    }
 
     static var hotkey: KeyCombo {
         get {

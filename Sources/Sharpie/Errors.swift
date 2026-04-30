@@ -7,6 +7,10 @@ enum SharpieError: LocalizedError {
     case apiError(status: Int, message: String)
     case networkError(underlying: Error)
 
+    case ollamaUnreachable(url: String)
+    case ollamaInvalidURL(String)
+    case ollamaModelMissing(String)
+
     var errorDescription: String? {
         switch self {
         case .missingAPIKey(let provider):
@@ -20,6 +24,13 @@ enum SharpieError: LocalizedError {
             return "Provider error (\(status)): \(message)"
         case .networkError(let underlying):
             return "Network error: \(underlying.localizedDescription)"
+
+        case .ollamaUnreachable(let url):
+            return "Couldn't reach Ollama at \(url). Run `ollama serve` or open the Ollama app, then try again."
+        case .ollamaInvalidURL(let url):
+            return "Invalid Ollama URL: \(url). Use something like http://localhost:11434."
+        case .ollamaModelMissing(let model):
+            return "Ollama doesn't have '\(model)' installed. Run `ollama pull \(model)` and try again."
         }
     }
 }
