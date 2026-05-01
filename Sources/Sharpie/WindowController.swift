@@ -34,14 +34,17 @@ final class SharpenWindowController {
             systemPrompt: systemPrompt,
             historyStore: historyStore
         )
-        // Adapt the window when state changes OR when output grows
-        // (streaming chunks, edits).
-        let trigger = Publishers.CombineLatest3(
+        // Adapt the window when state changes, when output grows
+        // (streaming chunks, edits), OR when the user types/pastes
+        // a longer input. CombineLatest4 fires whenever any of the
+        // four publishers emits a new value.
+        let trigger = Publishers.CombineLatest4(
             viewModel.$status,
             viewModel.$output,
-            viewModel.$outputEditing
+            viewModel.$outputEditing,
+            viewModel.$input
         )
-        .map { _, _, _ in () }
+        .map { _, _, _, _ in () }
         .receive(on: DispatchQueue.main)
         trigger
             .sink { [weak self] in
@@ -141,31 +144,49 @@ final class SharpenWindowController {
         window.setFrame(newFrame, display: true, animate: animated)
     }
 
-    /// Heuristic — picks a window height by state, then bumps for long
-    /// outputs so rewrites with multi-paragraph structure have room without
-    /// the user reaching for the scroll wheel.
+    /// Heuristic — picks a window height by state, factoring in both
+    /// the input the user is typing (so a long paste shows in full) and
+    /// the output the model is generating. Capped so a runaway in either
+    /// direction can't take over the screen.
     private func desiredHeight() -> CGFloat {
+        // Input area height: ~36pt min, scales per visual line, capped
+        // around ~320pt + 24pt of padding around it.
+        let inputContentHeight = visualHeight(for: viewModel.input, perLine: 22)
+        let inputAreaHeight: CGFloat = min(332, max(60, inputContentHeight + 12)) + 24
+
+        // Status bar + dividers below.
+        let chromeBelowInput: CGFloat = 40
+
         switch viewModel.status {
         case .idle:
-            return Self.compactHeight
+            // No output area to render — just input + status. Floor at
+            // compact (110) so a one-line prompt still feels tight.
+            let needed = inputAreaHeight + chromeBelowInput
+            return min(Self.maxExpandedHeight, max(Self.compactHeight, needed))
         case .needsSetup, .clarifying, .error:
-            return Self.baseExpandedHeight
+            return min(Self.maxExpandedHeight, max(Self.baseExpandedHeight, inputAreaHeight + chromeBelowInput + 140))
         case .streaming, .copied:
-            let output = viewModel.output
-            // Account for actual newlines plus soft-wrapped lines at ~74
-            // chars (matches the rendered width minus padding).
-            let charsPerLine: Double = 74
-            let lines = output.split(separator: "\n", omittingEmptySubsequences: false)
-            var rendered = 0
-            for line in lines {
-                rendered += max(1, Int(ceil(Double(line.count) / charsPerLine)))
-            }
-            // Fixed chrome (input + status + paddings) + per-line height.
-            let chrome: CGFloat = 170
-            let perLine: CGFloat = 22
-            let needed = chrome + CGFloat(rendered) * perLine
+            let outputContentHeight = visualHeight(for: viewModel.output, perLine: 22)
+            // Output area gets at least ~120pt for short rewrites, scales
+            // up with content.
+            let outputAreaHeight: CGFloat = max(120, outputContentHeight + 32)
+            let needed = inputAreaHeight + outputAreaHeight + chromeBelowInput
             return min(Self.maxExpandedHeight, max(Self.baseExpandedHeight, needed))
         }
+    }
+
+    /// Visual height for `text` rendered at ~70 chars per soft-wrap and
+    /// `perLine` points per line. Same heuristic the SharpenView uses for
+    /// the input frame so they grow in lockstep.
+    private func visualHeight(for text: String, perLine: CGFloat) -> CGFloat {
+        guard !text.isEmpty else { return perLine }
+        let charsPerLine: Double = 70
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var count = 0
+        for line in lines {
+            count += max(1, Int(ceil(Double(line.count) / charsPerLine)))
+        }
+        return CGFloat(max(1, count)) * perLine
     }
 
     // MARK: - Local key handling
