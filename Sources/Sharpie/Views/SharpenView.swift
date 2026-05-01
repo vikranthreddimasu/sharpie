@@ -67,6 +67,32 @@ struct SharpenView: View {
         }
     }
 
+    /// Target height for the input field: scales with the user's input
+    /// so they see the whole thing while typing or after paste, capped
+    /// so a runaway paste can't take over the window.
+    private var inputDesiredHeight: CGFloat {
+        let estimate = SharpenView.visualLineCount(for: viewModel.input)
+        let perLine: CGFloat = 22
+        let minHeight: CGFloat = 36
+        let maxHeight: CGFloat = 320
+        let raw = CGFloat(estimate) * perLine + 12
+        return min(maxHeight, max(minHeight, raw))
+    }
+
+    /// Estimate the on-screen line count of the input by counting hard
+    /// newlines and approximating soft wraps at ~70 chars per line. Same
+    /// heuristic the WindowController uses for output expansion so input
+    /// and window grow together.
+    static func visualLineCount(for text: String, charsPerLine: Double = 70) -> Int {
+        guard !text.isEmpty else { return 1 }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+        var count = 0
+        for line in lines {
+            count += max(1, Int(ceil(Double(line.count) / charsPerLine)))
+        }
+        return max(1, count)
+    }
+
     // MARK: - Input
 
     private var inputBlock: some View {
@@ -91,9 +117,12 @@ struct SharpenView: View {
                 isEditable: viewModel.isInputEditable,
                 identifier: "sharpieInput"
             )
-            // 140pt fits ~5 wrapped lines comfortably; longer inputs
-            // scroll within the field via the overlay scroller.
-            .frame(minHeight: 36, maxHeight: 140)
+            // The input self-sizes from the user's content: ~36pt while
+            // empty / single line, growing per visual line up to ~320pt
+            // (about 14 wrapped lines). Past that the field scrolls
+            // internally so the overall window doesn't take over the
+            // screen.
+            .frame(height: inputDesiredHeight)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
