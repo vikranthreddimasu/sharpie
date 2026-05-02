@@ -1,0 +1,286 @@
+{
+  "_meta": {
+    "purpose": "Adversarial test suite for prompts/sharpen.md (rewrite-only design). Sharpie ALWAYS produces a rewrite — never a clarifying question. The runner checks classification (must be rewrite, never end with a single-sentence question) plus per-test assertions.",
+    "version": 2
+  },
+  "tests": [
+    {
+      "id": "T1.1",
+      "tier": "Lazy classics",
+      "input": "fix the login bug",
+      "expect": "rewrite",
+      "must_not_contain": ["OAuth", "JWT", "Passport", "session timeout", "bcrypt"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T1.2",
+      "tier": "Lazy classics",
+      "input": "this is slow",
+      "expect": "rewrite",
+      "must_not_contain": ["N+1", "database query", "useMemo", "useCallback"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T1.3",
+      "tier": "Lazy classics",
+      "input": "write tests for the api",
+      "expect": "rewrite",
+      "must_not_contain": ["Jest", "Vitest", "pytest", "/users", "/api/v1", "200 OK"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T1.4",
+      "tier": "Lazy classics",
+      "input": "refactor user.ts to use async/await",
+      "expect": "rewrite",
+      "must_contain": ["user.ts"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T1.5",
+      "tier": "Lazy classics",
+      "input": "explain this",
+      "expect": "rewrite",
+      "must_not_contain": ["function", "class", "module", "package.json"],
+      "must_contain_imperative": true
+    },
+
+    {
+      "id": "T2.1",
+      "tier": "Super-short (rewrite even when cryptic)",
+      "input": "fix",
+      "expect": "rewrite",
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T2.2",
+      "tier": "Super-short (rewrite even when cryptic)",
+      "input": "help",
+      "expect": "rewrite",
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T2.3",
+      "tier": "Super-short (rewrite even when cryptic)",
+      "input": "wtf",
+      "expect": "rewrite",
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T2.4",
+      "tier": "Super-short (rewrite even when cryptic)",
+      "input": "make it work",
+      "expect": "rewrite",
+      "must_contain_imperative": true
+    },
+
+    {
+      "id": "T3.1",
+      "tier": "Cryptic external context (rewrite anyway)",
+      "input": "do the thing we talked about",
+      "expect": "rewrite",
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T3.2",
+      "tier": "Cryptic external context (rewrite anyway)",
+      "input": "make it work like the mockup",
+      "expect": "rewrite",
+      "must_contain": ["mockup"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T3.3",
+      "tier": "Cryptic external context (rewrite anyway)",
+      "input": "the usual",
+      "expect": "rewrite",
+      "must_contain_imperative": true
+    },
+
+    {
+      "id": "T4.1",
+      "tier": "Hallucination traps",
+      "input": "fix the auth thing",
+      "expect": "rewrite",
+      "must_not_contain": ["OAuth", "JWT", "Passport", "bcrypt", "Auth0", "Clerk", "Supabase Auth", "session middleware"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T4.2",
+      "tier": "Hallucination traps",
+      "input": "make the database faster",
+      "expect": "rewrite",
+      "must_not_contain": ["Postgres", "MySQL", "MongoDB", "SQLite", "Redis", "B-tree", "GIN index", "EXPLAIN ANALYZE"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T4.3",
+      "tier": "Hallucination traps",
+      "input": "the api is broken",
+      "expect": "rewrite",
+      "must_not_contain": ["/api/users", "/api/v1", "POST /", "GET /", "Express", "FastAPI", "endpoint /"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T4.4",
+      "tier": "Hallucination traps",
+      "input": "shortcuts are broken in my app",
+      "expect": "rewrite",
+      "must_not_contain": ["~/.config", "settings.json", "keybindings.json", "shortcuts.json", "preferences.plist"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T4.5",
+      "tier": "Hallucination traps",
+      "input": "this React thing isn't working",
+      "expect": "rewrite",
+      "must_contain": ["React"],
+      "must_not_contain": ["useEffect", "useState", "Redux", "Next.js", "package.json", "node_modules"],
+      "must_contain_imperative": true
+    },
+
+    {
+      "id": "T5.1",
+      "tier": "Profane / ugly",
+      "input": "ugh this fucking thing again, fix it",
+      "expect": "rewrite",
+      "must_not_contain": ["fucking", "ugh"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T5.2",
+      "tier": "Profane / ugly",
+      "input": "ok so basically the form like submits but then nothing happens?? help",
+      "expect": "rewrite",
+      "must_contain": ["form"],
+      "must_not_contain": ["fucking", "ugh", "??"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T5.3",
+      "tier": "Profane / ugly",
+      "input": "i don't even know what im looking at anymore just fix it",
+      "expect": "rewrite",
+      "must_contain_imperative": true
+    },
+
+    {
+      "id": "T6.1",
+      "tier": "Multi-task lazy",
+      "input": "are these shortcuts actually useful and do they actually work? Fix that, also what about model selection for the user? And what about the UI features or tweaks?",
+      "expect": "rewrite",
+      "must_not_contain": ["~/.claude", "settings.json", "keybindings.json", "skill name"],
+      "must_contain_imperative": true,
+      "must_contain_all": ["shortcuts", "model selection"]
+    },
+    {
+      "id": "T6.2",
+      "tier": "Multi-task lazy",
+      "input": "fix the bug, write tests, and update the docs",
+      "expect": "rewrite",
+      "must_contain_imperative": true,
+      "must_contain_all": ["bug", "test", "doc"]
+    },
+    {
+      "id": "T6.3",
+      "tier": "Multi-task lazy",
+      "input": "refactor and improve performance and add caching",
+      "expect": "rewrite",
+      "must_contain_imperative": true,
+      "must_not_contain": ["Redis", "memcached", "lru-cache"]
+    },
+
+    {
+      "id": "T7.1",
+      "tier": "Already-good",
+      "input": "Refactor the useAuth hook in hooks/useAuth.ts to remove the useEffect+useState pattern in favor of useReducer. Preserve the public API. Update affected callers in the same file. Verify with the existing test suite.",
+      "expect": "rewrite",
+      "must_contain_all": ["useAuth", "hooks/useAuth.ts", "useReducer"],
+      "max_chars": 600
+    },
+    {
+      "id": "T7.2",
+      "tier": "Already-good",
+      "input": "Add a /healthz endpoint that returns 200 OK with a JSON body containing build SHA and uptime in seconds.",
+      "expect": "rewrite",
+      "must_contain_all": ["/healthz", "200", "JSON"],
+      "max_chars": 500
+    },
+
+    {
+      "id": "T8.1",
+      "tier": "Code/text dumps",
+      "input": "function add(a, b) { return a + b; }",
+      "expect": "rewrite",
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T8.2",
+      "tier": "Code/text dumps",
+      "input": "TypeError: Cannot read property 'map' of undefined",
+      "expect": "rewrite",
+      "must_contain_imperative": true,
+      "must_contain": ["TypeError"]
+    },
+    {
+      "id": "T8.3",
+      "tier": "Code/text dumps",
+      "input": "Traceback (most recent call last):\n  File \"server.py\", line 42, in <module>\n    app.run()\nConnectionRefusedError: [Errno 61] Connection refused",
+      "expect": "rewrite",
+      "must_contain_imperative": true,
+      "must_contain": ["ConnectionRefusedError"]
+    },
+
+    {
+      "id": "T9.1",
+      "tier": "Weird inputs",
+      "input": "🐛 → 🦋",
+      "expect": "rewrite",
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T9.2",
+      "tier": "Weird inputs",
+      "input": "PLEASE FIX THIS",
+      "expect": "rewrite",
+      "must_contain_imperative": true,
+      "must_not_contain": ["PLEASE"]
+    },
+    {
+      "id": "T9.3",
+      "tier": "Weird inputs",
+      "input": "fix the bug — el botón no funciona",
+      "expect": "rewrite",
+      "must_contain": ["button"],
+      "must_contain_imperative": true
+    },
+
+    {
+      "id": "T10.1",
+      "tier": "Sophisticated",
+      "input": "I think there's a race condition somewhere in our payment processing flow but I haven't been able to reproduce it consistently",
+      "expect": "rewrite",
+      "must_contain_all": ["race", "payment"],
+      "must_not_contain": ["mutex", "Stripe", "PayPal", "lock-free", "threading.Lock"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T10.2",
+      "tier": "Sophisticated",
+      "input": "the new caching layer we added last week made cold-start slower somehow, can you figure out why",
+      "expect": "rewrite",
+      "must_contain_all": ["caching", "cold-start"],
+      "must_not_contain": ["Redis", "memcached", "warm-up cache"],
+      "must_contain_imperative": true
+    },
+    {
+      "id": "T10.3",
+      "tier": "Sophisticated",
+      "input": "the codebase has accumulated 3 different ways to handle errors, pick one and standardize",
+      "expect": "rewrite",
+      "must_contain": ["error"],
+      "must_not_contain": ["try/except", "Result type", "panic", "error boundary"],
+      "must_contain_imperative": true
+    }
+  ]
+}

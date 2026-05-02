@@ -1,86 +1,32 @@
 import Foundation
 
-// Small, deliberately-non-observable wrapper over UserDefaults. Settings
-// are read once when a request starts and written when the user clicks
-// Save in the settings panel — there's no need for live observation in
-// v0.1.
+/// Small, deliberately-non-observable wrapper over UserDefaults. Settings
+/// are read once when a request starts and written when the user clicks
+/// Save in the settings panel — there's no need for live observation in v2.
 enum AppPreferences {
     private enum Keys {
-        static let activeProvider = "sharpie.activeProvider"
-        static let openRouterModel = "sharpie.openRouterModel"
+        static let activeBackend = "sharpie.activeBackend"
         static let hotkey = "sharpie.hotkey"
         static let historyEnabled = "sharpie.historyEnabled"
-        static let ollamaURL = "sharpie.ollamaURL"
-        static let ollamaModel = "sharpie.ollamaModel"
-    }
-
-    static var activeProvider: ProviderID {
-        get {
-            let raw = UserDefaults.standard.string(forKey: Keys.activeProvider) ?? ""
-            if let stored = ProviderID(rawValue: raw) { return stored }
-            // No saved preference yet. If Ollama is installed on this
-            // Mac, prefer it — zero-config, free, private. Otherwise
-            // fall back to OpenRouter (BYOA, cheap-SOTA-open).
-            if OllamaInstallation.isInstalled { return .ollama }
-            return .openrouter
-        }
-        set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: Keys.activeProvider)
+        static func model(for backend: BackendID) -> String {
+            "sharpie.model.\(backend.rawValue)"
         }
     }
 
-    static var openRouterModel: String {
+    /// The user's preferred backend. May not actually be installed —
+    /// `BackendDetector` is the source of truth for what's runnable.
+    /// `nil` means "auto-pick the first available."
+    static var activeBackend: BackendID? {
         get {
-            let stored = UserDefaults.standard.string(forKey: Keys.openRouterModel)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if let stored, !stored.isEmpty { return stored }
-            return defaultOpenRouterModel
+            let raw = UserDefaults.standard.string(forKey: Keys.activeBackend) ?? ""
+            return BackendID(rawValue: raw)
         }
         set {
-            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            UserDefaults.standard.set(trimmed, forKey: Keys.openRouterModel)
-        }
-    }
-
-    // Cheap SOTA-open default. Vikky pays per token through OpenRouter and
-    // explicitly does not want Sharpie defaulting to Anthropic Sonnet or
-    // GPT-4-class models — minimax 2.7 hits 15/15 on the eval at a fraction
-    // of the cost. The model picker lets users override.
-    static let defaultOpenRouterModel = "minimax/minimax-m2.7"
-
-    /// The local Ollama daemon's default bind address. Override in
-    /// Settings if Ollama is running on a different port or a remote
-    /// host behind a reverse proxy.
-    static let defaultOllamaURL = "http://localhost:11434"
-
-    /// Reasonable starter model for Sharpie's task — small, fast, and
-    /// widely pre-pulled. The model picker shows whatever is actually
-    /// installed; this is just the placeholder before a pick is made.
-    static let defaultOllamaModel = "llama3.1:latest"
-
-    static var ollamaURL: String {
-        get {
-            let stored = UserDefaults.standard.string(forKey: Keys.ollamaURL)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if let stored, !stored.isEmpty { return stored }
-            return defaultOllamaURL
-        }
-        set {
-            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            UserDefaults.standard.set(trimmed, forKey: Keys.ollamaURL)
-        }
-    }
-
-    static var ollamaModel: String {
-        get {
-            let stored = UserDefaults.standard.string(forKey: Keys.ollamaModel)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if let stored, !stored.isEmpty { return stored }
-            return defaultOllamaModel
-        }
-        set {
-            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            UserDefaults.standard.set(trimmed, forKey: Keys.ollamaModel)
+            if let newValue {
+                UserDefaults.standard.set(newValue.rawValue, forKey: Keys.activeBackend)
+            } else {
+                UserDefaults.standard.removeObject(forKey: Keys.activeBackend)
+            }
         }
     }
 
@@ -97,15 +43,31 @@ enum AppPreferences {
         }
     }
 
-    /// History default-on. Vikky's call (CLAUDE.md said no history; this
-    /// is a deliberate override). The Settings UI shows a Disable
-    /// toggle for the privacy-strict.
+    /// User's chosen model for `backend`, or `nil` to use whatever default
+    /// the CLI is configured with. Free-form string — model availability
+    /// depends on the user's plan, so we don't gate on a known list.
+    static func model(for backend: BackendID) -> String? {
+        let raw = UserDefaults.standard.string(forKey: Keys.model(for: backend))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let raw, !raw.isEmpty else { return nil }
+        return raw
+    }
+
+    static func setModel(_ value: String?, for backend: BackendID) {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmed, !trimmed.isEmpty {
+            UserDefaults.standard.set(trimmed, forKey: Keys.model(for: backend))
+        } else {
+            UserDefaults.standard.removeObject(forKey: Keys.model(for: backend))
+        }
+    }
+
+    /// History off by default in v2 (changed from v1 default-on). The
+    /// Settings UI shows a toggle.
     static var historyEnabled: Bool {
         get {
-            // UserDefaults.bool returns false for missing keys; treat
-            // "never set" as the default-on case by checking the object.
             if UserDefaults.standard.object(forKey: Keys.historyEnabled) == nil {
-                return true
+                return false
             }
             return UserDefaults.standard.bool(forKey: Keys.historyEnabled)
         }

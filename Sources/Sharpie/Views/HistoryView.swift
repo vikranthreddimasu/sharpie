@@ -228,14 +228,7 @@ private struct HistoryRow: View {
     }
 
     private func providerBadge(for entry: HistoryEntry) -> String {
-        switch entry.provider {
-        case .anthropic:
-            return "Anthropic"
-        case .openrouter:
-            return entry.modelSlug.map { "OR · \($0)" } ?? "OpenRouter"
-        case .ollama:
-            return entry.modelSlug.map { "Ollama · \($0)" } ?? "Ollama"
-        }
+        entry.backend.displayName
     }
 }
 
@@ -275,14 +268,7 @@ private struct HistoryDetailView: View {
     }
 
     private var providerBadge: String {
-        switch entry.provider {
-        case .anthropic:
-            return "Anthropic · Claude Sonnet"
-        case .openrouter:
-            return entry.modelSlug.map { "OpenRouter · \($0)" } ?? "OpenRouter"
-        case .ollama:
-            return entry.modelSlug.map { "Ollama · \($0)" } ?? "Ollama"
-        }
+        entry.backend.displayName
     }
 
     private func section(

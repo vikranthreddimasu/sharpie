@@ -8,53 +8,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotkey: HotkeyService!
     private var windowController: SharpenWindowController!
     private var historyStore: HistoryStore!
+    private var detector: BackendDetector!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let prompt = (try? SystemPromptLoader.load()) ?? Self.fallbackPrompt
+        let prompt = SystemPromptLoader.loadOrFallback()
         historyStore = HistoryStore()
+        detector = BackendDetector()
+        detector.scan()
         windowController = SharpenWindowController(
             systemPrompt: prompt,
-            historyStore: historyStore
+            historyStore: historyStore,
+            detector: detector
         )
         installMainMenu()
         installStatusItem()
         installHotkey()
         firstRunFlowIfNeeded()
-        kickOffOllamaIfActive()
     }
 
-    /// If the user is on the Ollama provider, eagerly launch the daemon
-    /// at app start so that hitting ⌘/ a couple seconds later "just
-    /// works". The starter is a no-op when the daemon is already up.
-    private func kickOffOllamaIfActive() {
-        guard AppPreferences.activeProvider == .ollama else { return }
-        guard let url = URL(string: AppPreferences.ollamaURL),
-              url.scheme != nil, url.host != nil else { return }
-        Task { @MainActor in
-            let starter = OllamaDaemonStarter()
-            await starter.startIfNeeded(baseURL: url)
-        }
-    }
-
-    /// If the user has no provider key on file, surface Settings on launch
-    /// so they aren't staring at a menu-bar icon with nothing to do.
+    /// If no AI CLI is installed, pop the prompt window so the user sees
+    /// the install instructions instead of staring at a menu-bar icon
+    /// with no obvious next step.
     private func firstRunFlowIfNeeded() {
-        // Ollama doesn't need a key — if the user already picked it,
-        // skip the auto-Settings popup. They'll see a clean error if
-        // the daemon isn't actually running on the configured URL.
-        if AppPreferences.activeProvider == .ollama { return }
-        let hasOpenRouter = (KeychainService.get(.openrouter) != nil)
-        let hasAnthropic  = (KeychainService.get(.anthropic) != nil)
-        let envHasKey =
-            ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"]?.isEmpty == false
-            || ProcessInfo.processInfo.environment["ANTHROPIC_API_KEY"]?.isEmpty == false
-        guard !hasOpenRouter && !hasAnthropic && !envHasKey else { return }
-
-        // Defer to the next runloop tick so the status item is on screen
-        // first — otherwise Settings appears with the menu bar still
-        // resolving and feels jumpy.
+        guard !detector.hasAnyBackend else { return }
         DispatchQueue.main.async { [weak self] in
-            self?.windowController.showSettings()
+            self?.windowController.show()
         }
     }
 
@@ -110,9 +88,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 accessibilityDescription: "Sharpie"
             )
             button.imagePosition = .imageOnly
-            button.toolTip = "Sharpie — sharpen a lazy prompt (⌘/)"
+            button.toolTip = "Sharpie  ·  ⌘/"
         }
 
+        // Menu is intentionally short. The hotkey is the primary entry; the
+        // menu is only here for "I lost the hotkey" recovery and for Quit.
+        // History is reachable via ⌘Y from the prompt window — power-user
+        // discovery rather than menu clutter.
         let menu = NSMenu()
         let openItem = NSMenuItem(
             title: "Sharpen…   ⌘/",
@@ -121,14 +103,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         openItem.target = self
         menu.addItem(openItem)
-
-        let historyItem = NSMenuItem(
-            title: "History…",
-            action: #selector(openHistory),
-            keyEquivalent: "y"
-        )
-        historyItem.target = self
-        menu.addItem(historyItem)
 
         let settingsItem = NSMenuItem(
             title: "Settings…",
@@ -147,8 +121,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         aboutItem.target = self
         menu.addItem(aboutItem)
-
-        menu.addItem(.separator())
 
         let quitItem = NSMenuItem(
             title: "Quit Sharpie",
@@ -190,10 +162,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController.showSettings()
     }
 
-    @objc private func openHistory() {
-        windowController.showHistory()
-    }
-
     @objc private func openAbout() {
         // .accessory apps don't get the standard about panel "for free"
         // through the app menu; we present it manually with explicit
@@ -214,10 +182,4 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private static let fallbackPrompt: String = """
-    You are Sharpie. Rewrite the user's lazy prompt as the prompt they should
-    have typed for an AI coding tool. Output only the rewritten prompt — no
-    preamble — or, when the input is genuinely uninterpretable, ask exactly
-    one specific clarifying question ending with "?".
-    """
 }

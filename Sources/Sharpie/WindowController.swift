@@ -11,40 +11,52 @@ final class FocusableWindow: NSWindow {
 @MainActor
 final class SharpenWindowController {
 
-    // The window collapses to compact when there's nothing to render below
-    // the input, expands proportionally to output length up to a max so
-    // long rewrites have room without taking over the screen. Anchored at
-    // the top so the user's eye doesn't have to chase it.
-    private static let compactHeight: CGFloat = 110
-    private static let baseExpandedHeight: CGFloat = 280
-    private static let maxExpandedHeight: CGFloat = 620
+    // Single morph surface: window height tracks one content area + a thin
+    // hairline + padding. No "input zone vs output zone" math — just one
+    // text region that morphs through states.
+    private static let compactHeight: CGFloat = 84       // one-line input + hairline
+    private static let setupHeight: CGFloat = 320        // first-run install rows
+    private static let maxHeight: CGFloat = 580
     private static let windowWidth: CGFloat = 600
 
     let viewModel: SharpenViewModel
     let historyStore: HistoryStore
+    let detector: BackendDetector
     private var window: FocusableWindow?
     private var settingsWindow: NSWindow?
     private var historyWindow: NSWindow?
     private var localKeyMonitor: Any?
     private var observers: Set<AnyCancellable> = []
 
-    init(systemPrompt: String, historyStore: HistoryStore) {
+    // Mac virtual keycodes — Foundation/AppKit don't expose constants for
+    // these, and `NSEvent.charactersIgnoringModifiers` is locale-sensitive
+    // for things like comma on AZERTY. Using keyCodes keeps the bindings
+    // physical-position-stable across keyboard layouts.
+    private enum KeyCode {
+        static let escape: UInt16 = 53
+        static let returnKey: UInt16 = 36
+        static let z: UInt16 = 6
+        static let y: UInt16 = 16
+        static let comma: UInt16 = 43
+    }
+
+    init(systemPrompt: String, historyStore: HistoryStore, detector: BackendDetector) {
         self.historyStore = historyStore
+        self.detector = detector
         self.viewModel = SharpenViewModel(
             systemPrompt: systemPrompt,
-            historyStore: historyStore
+            historyStore: historyStore,
+            detector: detector
         )
-        // Adapt the window when state changes, when output grows
-        // (streaming chunks, edits), OR when the user types/pastes
-        // a longer input. CombineLatest4 fires whenever any of the
-        // four publishers emits a new value.
-        let trigger = Publishers.CombineLatest4(
+        // Adapt the window when status changes, when the rewrite arrives,
+        // or when the user types/pastes a longer input. Three publishers,
+        // one debounced re-layout per change.
+        let trigger = Publishers.CombineLatest3(
             viewModel.$status,
             viewModel.$output,
-            viewModel.$outputEditing,
             viewModel.$input
         )
-        .map { _, _, _, _ in () }
+        .map { _, _, _ in () }
         .receive(on: DispatchQueue.main)
         trigger
             .sink { [weak self] in
@@ -100,6 +112,7 @@ final class SharpenWindowController {
 
         let root = SharpenView(
             viewModel: viewModel,
+            detector: detector,
             onDismiss: { [weak self] in self?.hide() },
             onOpenSettings: { [weak self] in
                 self?.hide()
@@ -144,34 +157,31 @@ final class SharpenWindowController {
         window.setFrame(newFrame, display: true, animate: animated)
     }
 
-    /// Heuristic — picks a window height by state, factoring in both
-    /// the input the user is typing (so a long paste shows in full) and
-    /// the output the model is generating. Capped so a runaway in either
-    /// direction can't take over the screen.
+    /// Single-surface height: one content area sized by the longer of the
+    /// two texts (input vs. rewrite), plus the hairline and padding. Anchor
+    /// at the top so the user's eye doesn't chase the input.
     private func desiredHeight() -> CGFloat {
-        // Input area height: ~36pt min, scales per visual line, capped
-        // around ~320pt + 24pt of padding around it.
-        let inputContentHeight = visualHeight(for: viewModel.input, perLine: 22)
-        let inputAreaHeight: CGFloat = min(332, max(60, inputContentHeight + 12)) + 24
-
-        // Status bar + dividers below.
-        let chromeBelowInput: CGFloat = 40
+        // 14 (top pad) + content + 10 (bottom pad of surface) + 12 (hairline area) + 8 (bottom pad)
+        let chrome: CGFloat = 14 + 10 + 12 + 8
 
         switch viewModel.status {
-        case .idle:
-            // No output area to render — just input + status. Floor at
-            // compact (110) so a one-line prompt still feels tight.
-            let needed = inputAreaHeight + chromeBelowInput
-            return min(Self.maxExpandedHeight, max(Self.compactHeight, needed))
-        case .needsSetup, .clarifying, .error:
-            return min(Self.maxExpandedHeight, max(Self.baseExpandedHeight, inputAreaHeight + chromeBelowInput + 140))
+        case .needsSetup:
+            return Self.setupHeight
+
+        case .idle, .working, .error:
+            let h = visualHeight(for: viewModel.input, perLine: 22)
+            let content: CGFloat = max(28, min(360, h + 6))
+            var total = content + chrome
+            if case .error = viewModel.status { total += 22 }  // error message line
+            return min(Self.maxHeight, max(Self.compactHeight, total))
+
         case .streaming, .copied:
-            let outputContentHeight = visualHeight(for: viewModel.output, perLine: 22)
-            // Output area gets at least ~120pt for short rewrites, scales
-            // up with content.
-            let outputAreaHeight: CGFloat = max(120, outputContentHeight + 32)
-            let needed = inputAreaHeight + outputAreaHeight + chromeBelowInput
-            return min(Self.maxExpandedHeight, max(Self.baseExpandedHeight, needed))
+            // The input is gone — show the rewrite. As tokens stream in,
+            // viewModel.output grows; this re-fires per chunk and grows
+            // the window in lockstep so the latest text is always visible.
+            let outH = visualHeight(for: viewModel.output, perLine: 22)
+            let content: CGFloat = max(28, min(440, outH + 6))
+            return min(Self.maxHeight, max(Self.compactHeight, content + chrome))
         }
     }
 
@@ -209,10 +219,11 @@ final class SharpenWindowController {
         }
     }
 
-    /// True when the underlying NSTextView for the output editor is the
-    /// window's first responder. We tag the text view with the
-    /// "sharpieOutput" identifier in SharpenView so we can recognise it
-    /// without keeping a reference around.
+    /// True when the editable output text view is the window's first
+    /// responder. The morph surface mounts a SharpieTextView with
+    /// identifier "sharpieOutput" once the rewrite has settled — when the
+    /// user is editing the rewrite, ⌘Z should mean "undo the last keystroke,"
+    /// not "revert to original input."
     private func isOutputEditorFocused() -> Bool {
         guard let responder = window?.firstResponder as? NSTextView else { return false }
         return responder.identifier?.rawValue == "sharpieOutput"
@@ -220,26 +231,40 @@ final class SharpenWindowController {
 
     private func handleKey(_ event: NSEvent) -> NSEvent? {
         // Esc → dismiss.
-        if event.keyCode == 53 {
+        if event.keyCode == KeyCode.escape {
             hide()
+            return nil
+        }
+        // ⌘, → open Settings from the prompt window. Previously this only
+        // worked through the menu-bar item's keyEquivalent, which required
+        // the user to click the menu icon first. Now it's a real shortcut.
+        if event.keyCode == KeyCode.comma && event.modifierFlags.contains(.command) {
+            hide()
+            showSettings()
+            return nil
+        }
+        // ⌘Y → open History. Same fix as ⌘, — it was menu-only.
+        if event.keyCode == KeyCode.y && event.modifierFlags.contains(.command) {
+            hide()
+            showHistory()
             return nil
         }
         // ⌘Z is context-sensitive:
         //   - while the output editor has focus → standard text undo
         //     (NSTextView handles it; we just don't intercept).
         //   - while the input is focused and a rewrite/clarify is on
-        //     screen → revert to the original input (CLAUDE.md spec).
+        //     screen → revert to the original input.
         //   - everywhere else → fall through to the Edit menu's Undo so
         //     the text view's native undo works for typing mistakes.
-        if event.keyCode == 6 && event.modifierFlags.contains(.command) {
+        if event.keyCode == KeyCode.z && event.modifierFlags.contains(.command) {
             if isOutputEditorFocused() {
                 return event
             }
             switch viewModel.status {
-            case .copied, .clarifying:
+            case .copied:
                 viewModel.revertToOriginal()
                 return nil
-            case .idle, .streaming, .error, .needsSetup:
+            case .idle, .working, .streaming, .error, .needsSetup:
                 return event
             }
         }
@@ -247,12 +272,12 @@ final class SharpenWindowController {
         // copied. Shift+Return falls through so TextEditor inserts a newline.
         // While the output editor is focused, *all* Return keys belong to
         // the editor for newlines — don't intercept.
-        if event.keyCode == 36 && !event.modifierFlags.contains(.shift) {
+        if event.keyCode == KeyCode.returnKey && !event.modifierFlags.contains(.shift) {
             if isOutputEditorFocused() {
                 return event
             }
             switch viewModel.status {
-            case .streaming:
+            case .working, .streaming:
                 return nil
             case .copied:
                 hide()
@@ -261,7 +286,7 @@ final class SharpenWindowController {
                 // Let the SwiftUI default-action button (Open Settings) handle
                 // Return — fall through so the responder chain delivers it.
                 return event
-            case .idle, .clarifying, .error:
+            case .idle, .error:
                 viewModel.submit()
                 return nil
             }
@@ -306,12 +331,14 @@ final class SharpenWindowController {
             w.isReleasedWhenClosed = false
             settingsWindow = w
         }
-        // Rebuild the SwiftUI view on every open so we re-read the
-        // Keychain (the "Stored / Replace" indicator must be current) and
-        // re-fetch the OpenRouter model list.
-        let fresh = SettingsView(onClose: { [weak self] in
-            self?.settingsWindow?.close()
-        })
+        // Rebuild the SwiftUI view on every open so it re-scans for newly
+        // installed CLIs and reflects current detector state.
+        let fresh = SettingsView(
+            detector: detector,
+            onClose: { [weak self] in
+                self?.settingsWindow?.close()
+            }
+        )
         settingsWindow?.contentView = NSHostingView(rootView: fresh)
         settingsWindow?.center()
         settingsWindow?.makeKeyAndOrderFront(nil)

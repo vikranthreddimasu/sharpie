@@ -7,9 +7,9 @@ final class SharpenViewModel: ObservableObject {
     enum Status: Equatable {
         case idle
         case needsSetup
-        case streaming
-        case copied
-        case clarifying(question: String, original: String)
+        case working                 // submitted, no tokens yet
+        case streaming               // tokens arriving live
+        case copied                  // stream done, rewrite on clipboard
         case error(String)
     }
 
@@ -18,166 +18,129 @@ final class SharpenViewModel: ObservableObject {
     @Published var status: Status = .idle
     /// Bumped when the input field should retake focus (e.g., after revert).
     @Published var inputFocusToken: Int = 0
-    /// Bumped when the output editor should take focus (e.g., user clicked
-    /// "Edit" on the output area).
-    @Published var outputFocusToken: Int = 0
-    /// True when the output area is in editable mode (user is tweaking the
-    /// rewrite before pasting). False = rendered markdown view.
-    @Published var outputEditing: Bool = false
+    /// 0 → 1 during the morph animation. Driven by the view layer's
+    /// `withAnimation` block so it isn't stored persistently here.
+    @Published var sweepProgress: Double = 0
+    /// Wall-clock seconds since submit. Used for the >3s ghost counter on
+    /// the hairline. Polled lightly via Timer in working state.
+    @Published var elapsed: TimeInterval = 0
 
     let systemPrompt: String
     private let historyStore: HistoryStore
+    private let detector: BackendDetector
 
     private var streamTask: Task<Void, Never>?
+    private var elapsedTimer: Timer?
     private var lastOriginalInput: String = ""
-    private var hasAskedQuestion: Bool = false
-    /// The original AI output for the current rewrite, before the user
-    /// edited it. Lets us compare and capture a revision when the user
-    /// commits edits.
-    private(set) var aiOriginalOutput: String = ""
-    /// Identifier of the current history entry. Set when finalize() runs
-    /// and is used to attach edit revisions later in the same session.
     private var currentHistoryEntryId: UUID?
-    /// Provider + model at the moment of submit, captured so the history
-    /// entry records what produced the rewrite.
-    private var currentProvider: ProviderID = .openrouter
-    private var currentModelSlug: String?
+    private var currentBackend: BackendID = .claudeCode
+    private var submitStartedAt: Date?
+    @Published private(set) var lastDuration: TimeInterval?
 
-    init(systemPrompt: String, historyStore: HistoryStore) {
+    /// Session-local rewrite cache. An identical (backend, model, system
+    /// prompt, input) tuple returns instantly the second time. Cleared
+    /// only when the app exits — survives window dismiss/reopen so the
+    /// "I'm tweaking and resubmitting" flow stays fast.
+    private struct CacheKey: Hashable {
+        let backendID: BackendID
+        let model: String
+        let systemPromptHash: Int
+        let input: String
+    }
+    private var sessionCache: [CacheKey: String] = [:]
+
+    init(
+        systemPrompt: String,
+        historyStore: HistoryStore,
+        detector: BackendDetector
+    ) {
         self.systemPrompt = systemPrompt
         self.historyStore = historyStore
+        self.detector = detector
     }
 
     var placeholder: String {
-        switch status {
-        case .clarifying:
-            return "Answer in one line, then Enter…"
-        default:
-            return "Type a lazy prompt, then Enter…"
-        }
+        "Type, then ⏎ to sharpen"
     }
 
-    /// Locked while a rewrite is streaming so the user can read what they
-    /// sent without accidentally typing into the input field.
     var isInputEditable: Bool {
         switch status {
-        case .streaming, .needsSetup: return false
-        case .idle, .copied, .clarifying, .error: return true
+        case .working, .streaming, .needsSetup: return false
+        case .idle, .copied, .error: return true
         }
     }
 
-    var statusLine: String {
-        if outputEditing {
-            return "Editing   ·   ⌘Z to undo   ·   click Done or esc to save"
-        }
+    /// Hairline state derivation — single source of truth for the bottom
+    /// indicator. Streaming and pre-token waiting both look like
+    /// "working" to the hairline.
+    var hairline: StateHairline.Mode {
         switch status {
-        case .idle:
-            return "⏎ to sharpen   ·   esc to dismiss"
-        case .needsSetup:
-            return "Add an API key to start"
-        case .streaming:
-            return "Sharpening…"
-        case .copied:
-            return "Copied   ·   ⏎ or esc to dismiss   ·   ⌘Z to undo"
-        case .clarifying:
-            return "Answer in one line, then ⏎"
-        case .error:
-            return "⏎ to retry   ·   esc to dismiss"
+        case .idle, .needsSetup: return .idle
+        case .working, .streaming: return .working(elapsed: elapsed)
+        case .copied: return .copied
+        case .error: return .error
         }
-    }
-
-    private var hasUsableProvider: Bool {
-        // Ollama doesn't need a key — if the user picked it as their
-        // active provider, treat as configured. Submit time will surface
-        // a friendly error if the daemon isn't running.
-        if AppPreferences.activeProvider == .ollama { return true }
-        if KeychainService.get(.openrouter) != nil { return true }
-        if KeychainService.get(.anthropic) != nil { return true }
-        let env = ProcessInfo.processInfo.environment
-        if let v = env["OPENROUTER_API_KEY"], !v.isEmpty { return true }
-        if let v = env["ANTHROPIC_API_KEY"], !v.isEmpty { return true }
-        return false
     }
 
     func focusInput() {
         inputFocusToken &+= 1
     }
 
-    func focusOutput() {
-        outputFocusToken &+= 1
+    /// True if at least one supported CLI is installed.
+    private var hasUsableBackend: Bool {
+        detector.hasAnyBackend
     }
 
-    /// Toggle the output area between rendered markdown view and editable
-    /// plain-text mode. Called from the Edit/Done button in SharpenView.
-    func toggleOutputEditing() {
-        if outputEditing {
-            commitOutputEdit()
-        } else {
-            outputEditing = true
-            focusOutput()
-        }
-    }
-
-    /// Persist whatever the user typed in the output editor: keep it in
-    /// the clipboard, push a revision into the history store (if enabled
-    /// and the text actually changed), and switch back to rendered view.
-    func commitOutputEdit() {
-        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
-        ClipboardService.copy(trimmed.isEmpty ? output : trimmed)
-        if let entryId = currentHistoryEntryId, AppPreferences.historyEnabled, !trimmed.isEmpty {
-            historyStore.appendRevision(entryId: entryId, text: trimmed)
-        }
-        outputEditing = false
-    }
-
-    /// Called when the window is opened by the hotkey. Don't wipe the user's
-    /// in-flight input mid-stream; only reset if we're between runs. If no
-    /// provider key is configured, surface the empty-setup state so the user
-    /// sees what to do instead of typing into a dead input.
     func windowDidOpen() {
+        if case .working = status { return }
         if case .streaming = status { return }
-        if !hasUsableProvider {
+        detector.scan()
+        if !hasUsableBackend {
             status = .needsSetup
             input = ""
             output = ""
             return
         }
-        if case .needsSetup = status {
-            status = .idle
-        }
+        if case .needsSetup = status { status = .idle }
         focusInput()
     }
 
-    /// Called when the window is dismissed. Cancels in-flight work and resets.
     func windowDidClose() {
-        // If the user dismissed mid-edit, treat it like a commit so the
-        // final state still gets persisted.
-        if outputEditing {
-            commitOutputEdit()
-        }
         streamTask?.cancel()
         streamTask = nil
+        stopElapsedTimer()
         input = ""
         output = ""
         status = .idle
-        hasAskedQuestion = false
+        sweepProgress = 0
+        elapsed = 0
         lastOriginalInput = ""
-        aiOriginalOutput = ""
-        outputEditing = false
         currentHistoryEntryId = nil
+        submitStartedAt = nil
+        lastDuration = nil
     }
 
-    /// ⌘Z escape hatch. Pulls the original input back into the field so the
-    /// user can edit and re-run it.
+    /// ⌘Z escape hatch. Pulls the original input back so the user can edit
+    /// and re-run.
     func revertToOriginal() {
         guard !lastOriginalInput.isEmpty else { return }
         streamTask?.cancel()
         streamTask = nil
+        stopElapsedTimer()
         input = lastOriginalInput
         output = ""
         status = .idle
-        hasAskedQuestion = false
+        sweepProgress = 0
+        elapsed = 0
         focusInput()
+    }
+
+    /// User edited the rewrite in place. Refresh the clipboard so paste
+    /// always matches what's on screen.
+    func userEditedOutput() {
+        let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        ClipboardService.copy(trimmed)
     }
 
     func submit() {
@@ -185,132 +148,161 @@ final class SharpenViewModel: ObservableObject {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        // Determine whether this submission is the original prompt or the
-        // answer to a clarify question.
-        let userInput: String
-        let isClarifyAnswer: Bool
-        if case .clarifying(let question, let original) = status {
-            userInput = """
-            Original prompt:
-            \(original)
-
-            Your previous question:
-            \(question)
-
-            The user's answer:
-            \(trimmed)
-            """
-            isClarifyAnswer = true
-        } else {
-            lastOriginalInput = trimmed
-            userInput = trimmed
-            isClarifyAnswer = false
-        }
-
-        // For the original prompt: preserve the input field so the user
-        // sees what they sent while the rewrite streams. For a clarify
-        // answer: clear so the input doesn't show "src/auth.ts" while
-        // the rewritten prompt streams in below.
-        if isClarifyAnswer {
-            input = ""
-        }
+        lastOriginalInput = trimmed
+        let userInput = trimmed
         output = ""
-        status = .streaming
+        sweepProgress = 0
 
-        // Capture provider/model context for history attribution.
-        currentProvider = AppPreferences.activeProvider
-        switch currentProvider {
-        case .openrouter: currentModelSlug = AppPreferences.openRouterModel
-        case .ollama:     currentModelSlug = AppPreferences.ollamaModel
-        case .anthropic:  currentModelSlug = nil
+        guard let backend = resolveBackend() else {
+            status = .needsSetup
+            return
+        }
+        currentBackend = backend.id
+
+        // Cache hit — instant copy, no subprocess spawn, no animation
+        // (the cross-fade is in MorphSurface's transition between phases).
+        let model = AppPreferences.model(for: currentBackend) ?? currentBackend.defaultModel ?? ""
+        let key = CacheKey(
+            backendID: currentBackend,
+            model: model,
+            systemPromptHash: systemPrompt.hashValue,
+            input: userInput
+        )
+        if let cached = sessionCache[key] {
+            lastDuration = 0
+            output = cached
+            ClipboardService.copy(cached)
+            status = .copied
+            recordHistoryIfEnabled(text: cached)
+            return
         }
 
-        // Resolve the system prompt for the *currently selected*
-        // provider — Apple Intelligence gets a smaller on-device-tuned
-        // prompt, frontier API providers get the full one. Resolved at
-        // submit time so a provider switch in Settings takes effect on
-        // the next ⌘/, no app restart.
-        let prompt = SystemPromptLoader.load(for: currentProvider)
+        lastDuration = nil
+        submitStartedAt = Date()
+        elapsed = 0
+        startElapsedTimer()
+        status = .working
 
+        let prompt = systemPrompt
+        let cacheKey = key
         streamTask = Task { [weak self] in
             guard let self else { return }
-            await self.runStream(systemPrompt: prompt, userInput: userInput)
-        }
-    }
-
-    private func runStream(systemPrompt: String, userInput: String) async {
-        do {
-            let provider = try ProviderFactory.makeDefault()
-            var accumulated = ""
-            for try await chunk in provider.streamCompletion(systemPrompt: systemPrompt, userInput: userInput) {
-                if Task.isCancelled { return }
-                accumulated += chunk
-                self.output = accumulated
-            }
-            finalize(text: accumulated)
-        } catch is CancellationError {
-            // Cancellation is silent — the user closed the window or hit ⌘Z.
-        } catch let error as SharpieError {
-            output = ""
-            status = .error(error.errorDescription ?? "Something went wrong.")
-            input = lastOriginalInput
-            focusInput()
-        } catch {
-            output = ""
-            status = .error(error.localizedDescription)
-            input = lastOriginalInput
-            focusInput()
-        }
-    }
-
-    private func finalize(text: String) {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            status = .error("No response from the provider.")
-            input = lastOriginalInput
-            focusInput()
-            return
-        }
-
-        // Clarify path: only allowed once, and only when the entire output is
-        // a single short interrogative sentence. Anything else is treated as
-        // a rewrite — including rewrites that happen to end with a "?".
-        if !hasAskedQuestion && looksLikeClarifyingQuestion(trimmed) {
-            hasAskedQuestion = true
-            status = .clarifying(question: trimmed, original: lastOriginalInput)
-            output = ""
-            input = ""
-            focusInput()
-            return
-        }
-
-        ClipboardService.copy(trimmed)
-        output = trimmed
-        aiOriginalOutput = trimmed
-        outputEditing = false
-        status = .copied
-
-        // Record the new entry. We only persist if history is enabled,
-        // and only on the *original* prompt — not on a clarify answer
-        // (the original is already attached to its own entry).
-        if AppPreferences.historyEnabled && !lastOriginalInput.isEmpty {
-            currentHistoryEntryId = historyStore.appendEntry(
-                originalInput: lastOriginalInput,
-                aiOutput: trimmed,
-                provider: currentProvider,
-                modelSlug: currentModelSlug
+            await self.runStream(
+                backend: backend,
+                systemPrompt: prompt,
+                userInput: userInput,
+                cacheKey: cacheKey
             )
         }
     }
 
-    private func looksLikeClarifyingQuestion(_ text: String) -> Bool {
-        guard text.hasSuffix("?") else { return false }
-        guard text.count <= 240 else { return false }
-        // A clarify is one sentence. If there are interior sentence
-        // terminators it's almost certainly a rewrite that happened to end
-        // with a question.
-        let body = text.dropLast()
-        let interiorTerminators = body.filter { $0 == "." || $0 == "!" || $0 == "?" }
-        return interiorTerminators.isEmpty
+    /// Pick the user's preferred backend if installed, otherwise the first
+    /// detected. Falls back to Sharpie's quality-first model default when
+    /// the user hasn't picked one in Settings.
+    private func resolveBackend() -> (any AIToolBackend)? {
+        let detections = detector.available
+        guard !detections.isEmpty else { return nil }
+        let pref = AppPreferences.activeBackend
+        let chosen = detections.first(where: { $0.id == pref }) ?? detections[0]
+        let model = AppPreferences.model(for: chosen.id) ?? chosen.id.defaultModel
+        switch chosen.id {
+        case .claudeCode:
+            return ClaudeCodeBackend(executablePath: chosen.executablePath, model: model)
+        case .codex:
+            return CodexBackend(executablePath: chosen.executablePath, model: model)
+        case .gemini:
+            return GeminiBackend(executablePath: chosen.executablePath, model: model)
+        }
+    }
+
+    private func runStream(
+        backend: any AIToolBackend,
+        systemPrompt: String,
+        userInput: String,
+        cacheKey: CacheKey
+    ) async {
+        do {
+            var accumulated = ""
+            var firstChunkSeen = false
+            for try await chunk in backend.streamCompletion(systemPrompt: systemPrompt, userInput: userInput) {
+                if Task.isCancelled { return }
+                accumulated += chunk
+                if !firstChunkSeen {
+                    firstChunkSeen = true
+                    // Flip into streaming mode on the first delta — the
+                    // user sees text start appearing instead of a blank
+                    // pulse for the full round-trip duration.
+                    status = .streaming
+                }
+                output = accumulated.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            stopElapsedTimer()
+            await finalize(text: accumulated, cacheKey: cacheKey)
+        } catch is CancellationError {
+            stopElapsedTimer()
+        } catch let error as SharpieError {
+            stopElapsedTimer()
+            failWith(error.errorDescription ?? "Something went wrong.")
+        } catch {
+            stopElapsedTimer()
+            failWith(error.localizedDescription)
+        }
+    }
+
+    private func failWith(_ message: String) {
+        output = ""
+        status = .error(message)
+        input = lastOriginalInput
+        focusInput()
+    }
+
+    private func finalize(text: String, cacheKey: CacheKey) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            failWith("No response from the backend.")
+            return
+        }
+
+        if let started = submitStartedAt {
+            lastDuration = Date().timeIntervalSince(started)
+        }
+        submitStartedAt = nil
+
+        output = trimmed
+        ClipboardService.copy(trimmed)
+        status = .copied
+        sessionCache[cacheKey] = trimmed
+
+        recordHistoryIfEnabled(text: trimmed)
+    }
+
+    private func recordHistoryIfEnabled(text: String) {
+        guard AppPreferences.historyEnabled, !lastOriginalInput.isEmpty else { return }
+        currentHistoryEntryId = historyStore.appendEntry(
+            originalInput: lastOriginalInput,
+            aiOutput: text,
+            backend: currentBackend,
+            modelSlug: AppPreferences.model(for: currentBackend) ?? currentBackend.defaultModel
+        )
+    }
+
+    // MARK: - Elapsed timer
+
+    /// Drives the `elapsed` publisher used by the >3s ghost counter on the
+    /// hairline. ~10Hz is plenty — the counter renders to one decimal at most.
+    private func startElapsedTimer() {
+        stopElapsedTimer()
+        let started = Date()
+        elapsedTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.elapsed = Date().timeIntervalSince(started)
+            }
+        }
+    }
+
+    private func stopElapsedTimer() {
+        elapsedTimer?.invalidate()
+        elapsedTimer = nil
     }
 }

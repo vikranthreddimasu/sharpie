@@ -8,7 +8,7 @@ struct HistoryEntry: Identifiable, Codable, Equatable, Sendable {
     var originalInput: String
     var aiOutput: String
     var revisions: [Revision]
-    var provider: ProviderID
+    var backend: BackendID
     var modelSlug: String?
 
     /// The most recent text — either the latest revision the user
@@ -75,7 +75,7 @@ final class HistoryStore: ObservableObject {
     func appendEntry(
         originalInput: String,
         aiOutput: String,
-        provider: ProviderID,
+        backend: BackendID,
         modelSlug: String?
     ) -> UUID {
         let entry = HistoryEntry(
@@ -84,7 +84,7 @@ final class HistoryStore: ObservableObject {
             originalInput: originalInput,
             aiOutput: aiOutput,
             revisions: [],
-            provider: provider,
+            backend: backend,
             modelSlug: modelSlug
         )
         // Most recent first — the History UI reads top-down.

@@ -2,311 +2,185 @@ import SwiftUI
 
 struct SharpenView: View {
     @ObservedObject var viewModel: SharpenViewModel
+    @ObservedObject var detector: BackendDetector
     let onDismiss: () -> Void
     let onOpenSettings: () -> Void
 
     var body: some View {
         Group {
             if case .needsSetup = viewModel.status {
-                setupView
+                SetupView(
+                    detector: detector,
+                    onOpenSettings: onOpenSettings,
+                    onDetectionChanged: {
+                        // The user just installed a CLI and re-scanned. If
+                        // anything is now detectable, leave the setup screen
+                        // and land on the prompt input.
+                        viewModel.windowDidOpen()
+                    }
+                )
             } else {
-                primaryView
+                surface
             }
         }
         .background(VisualEffectView(material: .hudWindow, blendingMode: .behindWindow))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 0.5)
+                .strokeBorder(Color.white.opacity(0.06), lineWidth: 0.5)
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .animation(.easeInOut(duration: 0.18), value: statusKey)
     }
 
-    private var primaryView: some View {
+    // MARK: - Surface
+
+    private var surface: some View {
         VStack(spacing: 0) {
-            inputBlock
-            if showsOutputArea {
-                Divider().opacity(0.35)
-                outputBlock
-            }
-            Divider().opacity(0.35)
-            statusBar
-        }
-    }
+            morphArea
+            StateHairline(state: viewModel.hairline)
+                .padding(.horizontal, 14)
+                .padding(.bottom, 6)
 
-    private var setupView: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 28))
-                .foregroundStyle(.tint)
-            VStack(spacing: 4) {
-                Text("Welcome to Sharpie")
-                    .font(.title3.weight(.semibold))
-                Text("Add an API key to start sharpening prompts.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            Button(action: onOpenSettings) {
-                Label("Open Settings", systemImage: "gearshape.fill")
-                    .padding(.horizontal, 6)
-            }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .keyboardShortcut(.defaultAction)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(28)
-    }
-
-    private var showsOutputArea: Bool {
-        switch viewModel.status {
-        case .idle, .needsSetup: return false
-        case .streaming, .copied, .clarifying, .error: return true
-        }
-    }
-
-    /// Target height for the input field: scales with the user's input
-    /// so they see the whole thing while typing or after paste, capped
-    /// so a runaway paste can't take over the window.
-    private var inputDesiredHeight: CGFloat {
-        let estimate = SharpenView.visualLineCount(for: viewModel.input)
-        let perLine: CGFloat = 22
-        let minHeight: CGFloat = 36
-        let maxHeight: CGFloat = 320
-        let raw = CGFloat(estimate) * perLine + 12
-        return min(maxHeight, max(minHeight, raw))
-    }
-
-    /// Estimate the on-screen line count of the input by counting hard
-    /// newlines and approximating soft wraps at ~70 chars per line. Same
-    /// heuristic the WindowController uses for output expansion so input
-    /// and window grow together.
-    static func visualLineCount(for text: String, charsPerLine: Double = 70) -> Int {
-        guard !text.isEmpty else { return 1 }
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-        var count = 0
-        for line in lines {
-            count += max(1, Int(ceil(Double(line.count) / charsPerLine)))
-        }
-        return max(1, count)
-    }
-
-    // MARK: - Input
-
-    private var inputBlock: some View {
-        ZStack(alignment: .topLeading) {
-            if viewModel.input.isEmpty {
-                Text(viewModel.placeholder)
-                    .font(.system(size: 15))
-                    .foregroundStyle(.tertiary)
-                    .padding(
-                        EdgeInsets(
-                            top: SharpieTextView.textInset.height,
-                            leading: SharpieTextView.textInset.width,
-                            bottom: 0,
-                            trailing: 0
-                        )
-                    )
-                    .allowsHitTesting(false)
-            }
-            SharpieTextView(
-                text: $viewModel.input,
-                focusToken: viewModel.inputFocusToken,
-                isEditable: viewModel.isInputEditable,
-                identifier: "sharpieInput"
-            )
-            // The input self-sizes from the user's content: ~36pt while
-            // empty / single line, growing per visual line up to ~320pt
-            // (about 14 wrapped lines). Past that the field scrolls
-            // internally so the overall window doesn't take over the
-            // screen.
-            .frame(height: inputDesiredHeight)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    // MARK: - Output
-
-    private var outputBlock: some View {
-        VStack(spacing: 0) {
-            outputControls
-            outputBody
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    @ViewBuilder
-    private var outputBody: some View {
-        if case .copied = viewModel.status, viewModel.outputEditing {
-            outputEditor
-        } else {
-            outputViewer
-        }
-    }
-
-    private var outputViewer: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                outputContent
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
-                Color.clear.frame(height: 1).id("outputBottom")
-            }
-            .onChange(of: viewModel.output) { _, _ in
-                withAnimation(.easeOut(duration: 0.12)) {
-                    proxy.scrollTo("outputBottom", anchor: .bottom)
-                }
-            }
-        }
-    }
-
-    private var outputEditor: some View {
-        SharpieTextView(
-            text: $viewModel.output,
-            focusToken: viewModel.outputFocusToken,
-            isEditable: true,
-            identifier: "sharpieOutput",
-            onCommit: { _ in
-                viewModel.commitOutputEdit()
-            }
-        )
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-    }
-
-    /// Dedicated toolbar row above the output content. Hosts the
-    /// Edit/Done button (and could host Copy / Regenerate later). Sits
-    /// outside the text reading area so it never overlaps the rewrite.
-    @ViewBuilder
-    private var outputControls: some View {
-        if case .copied = viewModel.status {
-            HStack(spacing: 8) {
-                Spacer()
-                editToggleButton
-            }
-            .padding(.horizontal, 12)
-            .padding(.top, 8)
-            .padding(.bottom, 4)
-        }
-    }
-
-    private var editToggleButton: some View {
-        Button(action: viewModel.toggleOutputEditing) {
-            HStack(spacing: 4) {
-                Image(systemName: viewModel.outputEditing
-                      ? "checkmark"
-                      : "pencil")
-                    .font(.system(size: 10, weight: .semibold))
-                Text(viewModel.outputEditing ? "Done" : "Edit")
-                    .font(.system(size: 11, weight: .medium))
-            }
-            .foregroundStyle(viewModel.outputEditing ? Color.white : Color.primary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                Capsule().fill(
-                    viewModel.outputEditing
-                        ? Color.accentColor
-                        : Color.secondary.opacity(0.18)
-                )
-            )
-        }
-        .buttonStyle(.plain)
-        .help(viewModel.outputEditing
-              ? "Save your edits and switch back to the rendered view"
-              : "Edit the rewrite before pasting")
-    }
-
-    @ViewBuilder
-    private var outputContent: some View {
-        switch viewModel.status {
-        case .clarifying(let question, _):
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: "questionmark.diamond.fill")
-                    .foregroundStyle(.tint)
-                    .font(.system(size: 14))
-                Text(question)
-                    .font(.system(size: 14))
-                    .textSelection(.enabled)
-            }
-        case .streaming:
-            // While streaming we render plain text — markdown parsing
-            // mid-stream produces flicker as the AI types unbalanced
-            // bold/italic markers.
-            Text(viewModel.output)
-                .font(.system(size: 14))
-                .textSelection(.enabled)
-                .lineSpacing(2)
-        case .copied:
-            MarkdownText(source: viewModel.output)
-                .font(.system(size: 14))
-                .textSelection(.enabled)
-        case .error(let message):
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.system(size: 14))
+            // Error message lives just below the hairline, intentionally
+            // small — the user reads it and resubmits in the same window.
+            if case .error(let message) = viewModel.status {
                 Text(message)
-                    .font(.system(size: 13))
-                    .textSelection(.enabled)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.red.opacity(0.85))
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 18)
+                    .padding(.bottom, 8)
+                    .transition(.opacity)
             }
-        case .idle, .needsSetup:
-            EmptyView()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// The single text region. Phase derived from the viewmodel — the view
+    /// transitions cleanly on phase change with implicit cross-fade.
+    private var morphArea: some View {
+        MorphSurface(
+            input: $viewModel.input,
+            output: $viewModel.output,
+            phase: phase,
+            inputFocusToken: viewModel.inputFocusToken,
+            isInputEditable: viewModel.isInputEditable,
+            placeholder: viewModel.placeholder
+        )
+        .onChange(of: viewModel.output) { _, _ in
+            // If the user edits the rewrite in place after the stream
+            // finished, refresh clipboard so paste matches what's on screen.
+            if case .copied = viewModel.status {
+                viewModel.userEditedOutput()
+            }
         }
     }
 
-    /// A simple equatable handle on `status` that we animate against. The
-    /// associated values are case-stable enough for visual transitions.
-    private var statusKey: String {
+    private var phase: MorphSurface.Phase {
         switch viewModel.status {
-        case .idle: return "idle"
-        case .needsSetup: return "needsSetup"
-        case .streaming: return "streaming"
-        case .copied: return "copied"
-        case .clarifying: return "clarifying"
-        case .error: return "error"
-        }
-    }
-
-    // MARK: - Status
-
-    private var statusBar: some View {
-        HStack(spacing: 8) {
-            statusBarLeading
-            Text(viewModel.statusLine)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-    }
-
-    @ViewBuilder
-    private var statusBarLeading: some View {
-        switch viewModel.status {
-        case .streaming:
-            ProgressView().controlSize(.small).scaleEffect(0.7)
-        case .copied:
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(.green)
-                .font(.system(size: 11, weight: .semibold))
-        case .error:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .font(.system(size: 11, weight: .semibold))
-        case .clarifying:
-            Image(systemName: "questionmark.diamond.fill")
-                .foregroundStyle(.tint)
-                .font(.system(size: 11, weight: .semibold))
-        case .idle, .needsSetup:
-            EmptyView()
+        case .idle, .error: return .input
+        case .working: return .working
+        case .streaming: return .streaming
+        case .copied: return .result
+        case .needsSetup: return .input  // unreachable here; setup view branches
         }
     }
 }
+
+// MARK: - First-run setup
+
+/// Shown when no AI CLI is installed. Three rows, one per supported backend,
+/// each with an Install link (deep-link to the official docs) and a status
+/// dot. Bottom: a Re-scan that re-checks $PATH the moment a CLI lands.
+///
+/// IMPORTANT: this view shares the *same* `BackendDetector` instance as the
+/// ViewModel — re-scanning here updates the source of truth, so when a user
+/// installs a CLI and clicks Re-scan, the prompt window flips out of setup
+/// mode (via `onDetectionChanged`).
+private struct SetupView: View {
+
+    @ObservedObject var detector: BackendDetector
+    let onOpenSettings: () -> Void
+    let onDetectionChanged: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Sharpie needs one of these installed.")
+                    .font(.system(size: 15, weight: .semibold))
+                Text("No API keys. Sharpie uses your existing CLI session.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(spacing: 8) {
+                installRow(.claudeCode, oneLiner: "Anthropic. Recommended.")
+                installRow(.codex, oneLiner: "OpenAI.")
+                installRow(.gemini, oneLiner: "Google.")
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    detector.scan()
+                    if detector.hasAnyBackend {
+                        onDetectionChanged()
+                    }
+                } label: {
+                    Label("Re-scan", systemImage: "arrow.clockwise")
+                }
+                .controlSize(.small)
+                Spacer()
+                Button("Settings", action: onOpenSettings)
+                    .controlSize(.small)
+            }
+            .padding(.top, 4)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onAppear { detector.scan() }
+    }
+
+    @ViewBuilder
+    private func installRow(_ backend: BackendID, oneLiner: String) -> some View {
+        let installed = detector.detection(for: backend) != nil
+        HStack(alignment: .center, spacing: 12) {
+            Circle()
+                .fill(installed ? Color.green : Color.secondary.opacity(0.35))
+                .frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(backend.displayName)
+                        .font(.system(size: 13, weight: .medium))
+                    if installed {
+                        Text("Installed")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(.green)
+                    }
+                }
+                Text(oneLiner)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !installed {
+                Button("Install") {
+                    if let url = URL(string: backend.installURL) {
+                        NSWorkspace.shared.open(url)
+                    }
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.secondary.opacity(installed ? 0.04 : 0.08), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.secondary.opacity(0.12))
+        )
+    }
+}
+
+import AppKit
